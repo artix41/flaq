@@ -1,4 +1,5 @@
-from typing import List, Set, Tuple
+from itertools import combinations
+from typing import List, Set, Tuple, Union
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,10 +9,34 @@ from panqec.codes import Toric2DCode, Planar2DCode, Color666PlanarCode
 
 
 class FlagCode:
-    def __init__(self, boundary_operators: List[np.ndarray], cell_positions=None):
+    def __init__(
+        self,
+        boundary_operators: List[np.ndarray],
+        cell_positions: List[List[Tuple]] = None,
+        x: int = 1,
+        z: int = 1
+    ):
+        """Flag code constructor
+
+        Parameters
+        ----------
+        boundary_operators : List[np.ndarray]
+            List of boundary operators for the input D-dimensional chain complex
+        cell_positions : _type_, optional
+            , by default None
+        x : int, optional
+            Size of Pauli X pinned set types (i.e. x in x-pinned set), by default 1
+        z : int, optional
+            Size of Pauli Z pinned set types (i.e. z in z-pinned set), by default 2
+        """
         self.boundary_operators = boundary_operators
         self.cell_positions = cell_positions
         self.dimension = len(self.boundary_operators)
+        self.n_levels = self.dimension + 1
+        self.n_colors = self.n_levels
+        self.all_colors = list(range(1, self.n_colors+1))
+        self.x = x
+        self.z = z
 
         for i in range(self.dimension-1):
             if self.boundary_operators[i].shape[1] != self.boundary_operators[i+1].shape[0]:
@@ -23,14 +48,22 @@ class FlagCode:
         for i in range(self.dimension):
             self.n_cells.append(boundary_operators[i].shape[1])
 
-        # Find all the flags recursively
-
         self.flags = []
         self.flag_to_index = dict()
         self.flag_coordinates = []
 
+        self._Hx: np.ndarray = None
+        self._Hz: np.ndarray = None
+
+        self.construct_graph(show=True)
+
+    def construct_graph(self, show=False):
+        """Find all flags from the chain complex and construct the graph"""
+
+        # Find all the flags recursively
+
         def get_completed_flags(flag_beginning: Tuple[int]):
-            if len(flag_beginning) == self.dimension+1:
+            if len(flag_beginning) == self.n_levels:
                 return [flag_beginning]
 
             completedFlags = []
@@ -45,7 +78,7 @@ class FlagCode:
             for flag in flags:
                 self.flag_to_index[flag] = len(self.flags)
                 self.flags.append(flag)
-                cell_coords = [cell_positions[i][flag[i]] for i in range(self.dimension+1)]
+                cell_coords = [self.cell_positions[i][flag[i]] for i in range(self.n_levels)]
                 flag_coords = np.mean(cell_coords, axis=0)
                 self.flag_coordinates.append(flag_coords)
 
@@ -66,17 +99,18 @@ class FlagCode:
                 )
 
             if left_adjacent_flags is None:
-                newCells = right_adjacent_flags
+                new_cells = right_adjacent_flags
             elif right_adjacent_flags is None:
-                newCells = left_adjacent_flags
+                new_cells = left_adjacent_flags
             else:
-                newCells = left_adjacent_flags.intersection(right_adjacent_flags)
+                new_cells = left_adjacent_flags.intersection(right_adjacent_flags)
 
-            adjacent_flags = [(*flag[:level], cell, *flag[level+1:]) for cell in newCells]
+            adjacent_flags = [(*flag[:level], cell, *flag[level+1:]) for cell in new_cells]
 
             return adjacent_flags
 
-        self.flag_adjacency = np.zeros((len(self.flags), len(self.flags)), dtype=np.uint8)
+        self.n_flags = len(self.flags)
+        self.flag_adjacency = np.zeros((self.n_flags, self.n_flags), dtype=np.uint8)
         explored_flags = set()
 
         def explore_graph_from_flag(flag: Tuple[int]):
@@ -85,10 +119,9 @@ class FlagCode:
 
             explored_flags.add(flag)
 
-            for level in range(self.dimension+1):
+            for level in range(self.n_levels):
                 for next_flag in get_adjacent_flags(flag, level):
                     if next_flag != flag:
-                        # print("Adj flags", nextFlag)
                         idx1, idx2 = self.flag_to_index[flag], self.flag_to_index[next_flag]
                         self.flag_adjacency[idx1, idx2] = level + 1
                         self.flag_adjacency[idx2, idx1] = level + 1
@@ -101,15 +134,21 @@ class FlagCode:
 
         edges, weights = zip(*nx.get_edge_attributes(self.graph, 'weight').items())
 
-        nx.draw(
-            self.graph, self.flag_coordinates, node_color='black', edge_color=np.array(weights)-1,
-            edge_cmap=plt.cm.tab20, node_size=200, width=2, with_labels=True, font_color='white',
-            font_size=7
-        )
+        if show:
+            nx.draw(
+                self.graph, self.flag_coordinates,
+                node_color='black', node_size=200,
+                edge_color=np.array(weights)-1, edge_cmap=plt.cm.tab20, width=2,
+                with_labels=True, font_color='white', font_size=7
+            )
 
-        plt.show()
+            plt.show()
 
-    def get_all_maximal_subgraphs(self, colors: Set[int]) -> List[Set[int]]:
+    def get_all_maximal_subgraphs(
+        self,
+        colors: Set[int],
+        return_arrays: bool = False
+    ) -> Union[List[Set[int]], List[np.ndarray]]:
         visited_nodes = set()
         maximal_subgraphs = []
 
@@ -121,7 +160,6 @@ class FlagCode:
             subgraph = {node}
 
             adj_nodes = self.flag_adjacency[node].nonzero()[0]
-
             for adj_node in adj_nodes:
                 if self.flag_adjacency[node, adj_node] in colors:
                     subgraph.update(get_max_subgraph(adj_node))
@@ -130,25 +168,58 @@ class FlagCode:
 
         for node in range(len(self.flag_adjacency)):
             if node not in visited_nodes:
-                maximal_subgraphs.append(get_max_subgraph(node))
+                subgraph_set = get_max_subgraph(node)
+
+                if return_arrays:
+                    subgraph_array = np.zeros(self.n_flags, dtype='uint8')
+                    subgraph_array[list(subgraph_set)] = 1
+                    maximal_subgraphs.append(subgraph_array)
+                else:
+                    maximal_subgraphs.append(subgraph_set)
 
         print("Maximal subgraphs\n", maximal_subgraphs)
         return maximal_subgraphs
 
     def is_pin_code_relation(self) -> bool:
-        for excluded_color in range(self.dimension+1):
-            colors = set(range(self.dimension+1)) - {excluded_color}
-
-            max_subgraphs = self.get_all_maximal_subgraphs(colors)
+        for color in self.all_colors:
+            max_subgraphs = self.get_all_maximal_subgraphs({color})
             for subgraph in max_subgraphs:
                 if len(subgraph) % 2 == 1:
                     return False
 
         return True
 
+    def get_stabilizers(self, n_pinned: int) -> np.ndarray:
+        max_subgraphs = []
+        for pinned_colors in combinations(self.all_colors, n_pinned):
+            free_colors = set(self.all_colors) - set(pinned_colors)
+
+            max_subgraphs.extend(
+                self.get_all_maximal_subgraphs(free_colors, return_arrays=True)
+            )
+
+        return np.array(max_subgraphs)
+
+    @property
+    def Hx(self):
+        if self._Hx is None:
+            self._Hx = self.get_stabilizers(self.x)
+
+        return self._Hx
+
+    @property
+    def Hz(self):
+        if self._Hz is None:
+            self._Hz = self.get_stabilizers(self.z)
+
+        return self._Hz
+
+    def is_valid_css(self):
+        return np.all((self.Hx @ self.Hz.T) % 2 == 0)
+
 
 if __name__ == "__main__":
-    code = Toric2DCode(3)
+    code = Toric2DCode(2)
     boundary_operators = [
         code.Hz.todense(),
         code.Hx.todense().T
@@ -160,6 +231,6 @@ if __name__ == "__main__":
     ]
 
     flag_code = FlagCode(boundary_operators, positions)
-    flag_code.get_all_maximal_subgraphs([1, 2])
-    print(f"Is it a pin code? {flag_code.is_pin_code_relation()}")
-    # print("Number of flags", len(flagCode.flags))
+    # flag_code.get_all_maximal_subgraphs([0, 2])
+    print(f"Is it a valid pin code? {flag_code.is_pin_code_relation()}")
+    print(f"Is it a valid CSS code? {flag_code.is_valid_css()}")
