@@ -1,11 +1,13 @@
 from itertools import combinations
 from typing import List, Set, Tuple, Union
 
-import numpy as np
+from ldpc.mod2 import rank
 import matplotlib.pyplot as plt
-
 import networkx as nx
+import numpy as np
 from panqec.codes import Toric2DCode, Planar2DCode, Color666PlanarCode
+
+from flaq.utils import get_all_logicals
 
 
 class FlagCode:
@@ -54,6 +56,12 @@ class FlagCode:
 
         self._Hx: np.ndarray = None
         self._Hz: np.ndarray = None
+        self._k: int = None
+        self._d_x: int = None
+        self._d_z: int = None
+        self._d: int = None
+        self._x_logicals: np.ndarray = None
+        self._z_logicals: np.ndarray = None
 
         self.construct_graph(show=True)
 
@@ -177,7 +185,7 @@ class FlagCode:
                 else:
                     maximal_subgraphs.append(subgraph_set)
 
-        print("Maximal subgraphs\n", maximal_subgraphs)
+        # print("Maximal subgraphs\n", maximal_subgraphs)
         return maximal_subgraphs
 
     def is_pin_code_relation(self) -> bool:
@@ -200,6 +208,28 @@ class FlagCode:
 
         return np.array(max_subgraphs)
 
+    def get_logicals(self) -> np.ndarray:
+        logicals = get_all_logicals(self.Hx, self.Hz, self.k)
+
+        self._x_logicals = logicals['X']
+        self._z_logicals = logicals['Z']
+
+        return logicals
+
+    @property
+    def x_logicals(self) -> np.ndarray:
+        if self._x_logicals is None:
+            self.get_logicals()
+
+        return self._x_logicals
+
+    @property
+    def z_logicals(self) -> np.ndarray:
+        if self._z_logicals is None:
+            self.get_logicals()
+
+        return self._z_logicals
+
     @property
     def Hx(self):
         if self._Hx is None:
@@ -213,6 +243,38 @@ class FlagCode:
             self._Hz = self.get_stabilizers(self.z)
 
         return self._Hz
+
+    @property
+    def n(self):
+        return self.n_flags
+
+    @property
+    def k(self):
+        if self._k is None:
+            self._k = self.n - rank(self.Hx) - rank(self.Hz)
+
+        return self._k
+
+    @property
+    def d_x(self):
+        if self._d_x is None:
+            self._d_x = np.min(np.sum(self.x_logicals, axis=1))
+
+        return self._d_x
+
+    @property
+    def d_z(self):
+        if self._d_z is None:
+            self._d_z = np.min(np.sum(self.z_logicals, axis=1))
+
+        return self._d_z
+
+    @property
+    def d(self):
+        if self._d is None:
+            self._d = min(self.d_x, self.d_z)
+
+        return self._d
 
     def is_valid_css(self):
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
@@ -234,3 +296,7 @@ if __name__ == "__main__":
     # flag_code.get_all_maximal_subgraphs([0, 2])
     print(f"Is it a valid pin code? {flag_code.is_pin_code_relation()}")
     print(f"Is it a valid CSS code? {flag_code.is_valid_css()}")
+    print(f"k: {flag_code.k}")
+    print(f"X Logical: {flag_code.x_logicals}")
+    print(f"Z Logical: {flag_code.z_logicals}")
+    print(f"Distance: {flag_code.d}")
