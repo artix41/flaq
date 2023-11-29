@@ -1,13 +1,18 @@
 from itertools import combinations
+import sys
 from typing import List, Set, Tuple, Union
 
 from ldpc.mod2 import rank
+from ldpc.codes import ring_code
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from panqec.codes import Toric2DCode, Planar2DCode, Color666PlanarCode
+from panqec.codes import Toric2DCode, Toric3DCode, Planar2DCode, Color666PlanarCode
 
 from flaq.utils import get_all_logicals
+from flaq.chain_complex import HypergraphComplex
+
+sys.setrecursionlimit(10000)
 
 
 class FlagCode:
@@ -31,6 +36,14 @@ class FlagCode:
         z : int, optional
             Size of Pauli Z pinned set types (i.e. z in z-pinned set), by default 2
         """
+        for H in boundary_operators:
+            print(H)
+            if not isinstance(H, np.ndarray):
+                raise ValueError("The matrices should be given as numpy arrays")
+
+            if isinstance(H, np.matrix):
+                raise ValueError("The matrices should be arrays, not np.matrix objects")
+
         self.boundary_operators = boundary_operators
         self.cell_positions = cell_positions
         self.dimension = len(self.boundary_operators)
@@ -63,7 +76,7 @@ class FlagCode:
         self._x_logicals: np.ndarray = None
         self._z_logicals: np.ndarray = None
 
-        self.construct_graph(show=True)
+        self.construct_graph(show=False)
 
     def construct_graph(self, show=False):
         """Find all flags from the chain complex and construct the graph"""
@@ -75,7 +88,8 @@ class FlagCode:
                 return [flag_beginning]
 
             completedFlags = []
-            for cell in boundary_operators[len(flag_beginning)-1][flag_beginning[-1]].nonzero()[1]:
+            cells = self.boundary_operators[len(flag_beginning)-1][flag_beginning[-1]]
+            for cell in cells.nonzero()[0]:
                 for flag in get_completed_flags((*flag_beginning, cell)):
                     completedFlags.append(flag)
 
@@ -86,9 +100,11 @@ class FlagCode:
             for flag in flags:
                 self.flag_to_index[flag] = len(self.flags)
                 self.flags.append(flag)
-                cell_coords = [self.cell_positions[i][flag[i]] for i in range(self.n_levels)]
-                flag_coords = np.mean(cell_coords, axis=0)
-                self.flag_coordinates.append(flag_coords)
+
+                if self.cell_positions is not None:
+                    cell_coords = [self.cell_positions[i][flag[i]] for i in range(self.n_levels)]
+                    flag_coords = np.mean(cell_coords, axis=0)
+                    self.flag_coordinates.append(flag_coords)
 
         # Build the colored graph of flags by exploring it recursively
 
@@ -98,12 +114,12 @@ class FlagCode:
 
             if level > 0:
                 left_adjacent_flags = set(
-                    self.boundary_operators[level-1][flag[level-1]].nonzero()[1]
+                    self.boundary_operators[level-1][flag[level-1]].nonzero()[0]
                 )
 
             if level < self.dimension:
                 right_adjacent_flags = set(
-                    self.boundary_operators[level].T[flag[level+1]].nonzero()[1]
+                    self.boundary_operators[level].T[flag[level+1]].nonzero()[0]
                 )
 
             if left_adjacent_flags is None:
@@ -141,6 +157,9 @@ class FlagCode:
         self.graph = nx.from_numpy_array(self.flag_adjacency)
 
         edges, weights = zip(*nx.get_edge_attributes(self.graph, 'weight').items())
+
+        if self.cell_positions is None:
+            self.flag_coordinates = nx.spring_layout(self.graph)
 
         if show:
             nx.draw(
@@ -279,24 +298,72 @@ class FlagCode:
     def is_valid_css(self):
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
 
+    def is_triorthogonal(self, pauli='X'):
+        H = self.Hx
+        L = self.x_logicals
+
+        # Check stabilizer triorthogonality
+        for i1 in range(H.shape[0]):
+            for i2 in range(H.shape[0]):
+                for i3 in range(H.shape[0]):
+                    if np.sum(H[i1] * H[i2] * H[i3]) % 2 != 0:
+                        print("Not triorthogonal at", i1, i2, i3)
+                        print(self.Hx[i1].nonzero()[0])
+                        print(self.Hx[i2].nonzero()[0])
+                        print(self.Hx[i3].nonzero()[0])
+                        return False
+
+        print("It is stabilizer triorthogonal")
+
+        # Check one-logical triorthogonality
+        for i1 in range(H.shape[0]):
+            for i2 in range(H.shape[0]):
+                for i3 in range(L.shape[0]):
+                    if np.sum(H[i1] * H[i2] * L[i3]) % 2 != 0:
+                        return False
+
+        print("It is one-logical triorthogonal")
+
+        # Check one-logical triorthogonality
+        for i1 in range(H.shape[0]):
+            for i2 in range(L.shape[0]):
+                for i3 in range(L.shape[0]):
+                    if np.sum(H[i1] * L[i2] * L[i3]) % 2 != 0:
+                        return False
+
+        print("It is two-logical triorthogonal")
+
+        return True
+
 
 if __name__ == "__main__":
-    code = Toric2DCode(2)
-    boundary_operators = [
-        code.Hz.todense(),
-        code.Hx.todense().T
-    ]
-    positions = [
-        np.array(code.stabilizer_coordinates)[code.z_indices],
-        code.qubit_coordinates,
-        np.array(code.stabilizer_coordinates)[code.x_indices]
-    ]
+    # code = Toric2DCode(2)
+    # boundary_operators = [
+    #     np.array(code.Hz.todense()),
+    #     np.array(code.Hx.todense().T)
+    # ]
+    # print(boundary_operators)
+    # positions = None
+
+    # positions = [
+    #     np.array(code.stabilizer_coordinates)[code.z_indices],
+    #     code.qubit_coordinates,
+    #     np.array(code.stabilizer_coordinates)[code.x_indices]
+    # ]
+
+    H = ring_code(3)
+    complex = HypergraphComplex([H, H, H])
+    boundary_operators = complex.boundary_operators
+    positions = None
+    print(boundary_operators)
 
     flag_code = FlagCode(boundary_operators, positions)
     # flag_code.get_all_maximal_subgraphs([0, 2])
     print(f"Is it a valid pin code? {flag_code.is_pin_code_relation()}")
     print(f"Is it a valid CSS code? {flag_code.is_valid_css()}")
+    print(f"n: {flag_code.n}")
     print(f"k: {flag_code.k}")
-    print(f"X Logical: {flag_code.x_logicals}")
-    print(f"Z Logical: {flag_code.z_logicals}")
-    print(f"Distance: {flag_code.d}")
+    # print(f"X Logical: {flag_code.x_logicals}")
+    # print(f"Z Logical: {flag_code.z_logicals}")
+    # print(f"Distance: {flag_code.d}")
+    # print(f"Is triorthogonal: {flag_code.is_triorthogonal()}")

@@ -1,5 +1,6 @@
 import pytest
 
+import numpy as np
 from panqec.codes import Toric2DCode
 
 from flaq.flag_code import FlagCode
@@ -10,8 +11,8 @@ class TestFlagCode:
         for L in range(2, 5):
             code = Toric2DCode(L)
             boundaryOperators = [
-                code.Hz.todense(),
-                code.Hx.todense().T
+                np.array(code.Hz.todense()),
+                np.array(code.Hx.todense().T)
             ]
 
             flagCode = FlagCode(boundaryOperators)
