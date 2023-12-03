@@ -29,8 +29,8 @@ def get_minimum_logical(H, anticommuting_logical):
         error_rate=0.1,
         max_iter=200,
         bp_method='msl',
-        osd_method="osd_cs",
-        osd_order=10
+        osd_method="osd0",
+        osd_order=0
     )
 
     syndrome = np.array([0] * H.shape[0] + [1])

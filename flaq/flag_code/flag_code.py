@@ -21,7 +21,8 @@ class FlagCode:
         boundary_operators: List[np.ndarray],
         cell_positions: List[List[Tuple]] = None,
         x: int = 1,
-        z: int = 1
+        z: int = 1,
+        add_boundary_pins=True
     ):
         """Flag code constructor
 
@@ -37,7 +38,6 @@ class FlagCode:
             Size of Pauli Z pinned set types (i.e. z in z-pinned set), by default 2
         """
         for H in boundary_operators:
-            print(H)
             if not isinstance(H, np.ndarray):
                 raise ValueError("The matrices should be given as numpy arrays")
 
@@ -53,11 +53,23 @@ class FlagCode:
         self.x = x
         self.z = z
 
+        if x + z > self.dimension:
+            raise ValueError(
+                f"x+z must be below the dimension. "
+                f"Currently {x}+{z} > {self.dimension}"
+            )
+
         for i in range(self.dimension-1):
             if self.boundary_operators[i].shape[1] != self.boundary_operators[i+1].shape[0]:
                 raise ValueError(
                     f"Incorrect dimensions for input adjacency matrices {i} and {i+1}"
                 )
+
+        self.has_boundary_vertex = False
+        self.has_boundary_cell = False
+
+        if add_boundary_pins:
+            self.add_boundary_pins()
 
         self.n_cells = [boundary_operators[0].shape[0]]
         for i in range(self.dimension):
@@ -77,6 +89,33 @@ class FlagCode:
         self._z_logicals: np.ndarray = None
 
         self.construct_graph(show=False)
+
+    def add_boundary_pins(self):
+        # print(self.boundary_operators[0].shape)
+        new_column = np.array([np.sum(self.boundary_operators[-1], axis=1) % 2]).T
+
+        if not np.all(new_column == 0):
+            self.has_boundary_vertex = True
+            self.boundary_operators[-1] = np.hstack([
+                self.boundary_operators[-1],
+                new_column
+            ])
+
+        new_row = np.sum(self.boundary_operators[0], axis=0) % 2
+
+        if not np.all(new_row == 0):
+            self.has_boundary_cell = True
+            self.boundary_operators[0] = np.vstack([
+                self.boundary_operators[0],
+                new_row
+            ])
+
+        if self.cell_positions is not None:
+            eps1, eps2 = np.random.random(), np.random.random()
+            if self.has_boundary_vertex:
+                self.cell_positions[0] = np.vstack([self.cell_positions[0], [eps1, eps1]])
+            if self.has_boundary_cell:
+                self.cell_positions[-1] = np.vstack([self.cell_positions[-1], [eps2, eps2]])
 
     def construct_graph(self, show=False):
         """Find all flags from the chain complex and construct the graph"""
@@ -171,6 +210,28 @@ class FlagCode:
 
             plt.show()
 
+    def get_all_rainbow_subgraphs(k: int):
+        """Get all subgraphs where each node is connected to k edges
+        of k different colors
+        """
+        visited_nodes = set()
+        rainbow_subgraphs = []
+
+        def get_rainbow_subgraph(node: int):
+            if node in visited_nodes:
+                return {}
+
+            visited_nodes.add(node)
+            subgraph = {node}
+
+            adj_nodes = self.flag_adjacency[node].nonzero()[0]
+            for adj_node in adj_nodes:
+                if self.flag_adjacency[node, adj_node] in colors:
+                    subgraph.update(get_max_subgraph(adj_node))
+
+            return subgraph
+
+
     def get_all_maximal_subgraphs(
         self,
         colors: Set[int],
@@ -212,6 +273,7 @@ class FlagCode:
             max_subgraphs = self.get_all_maximal_subgraphs({color})
             for subgraph in max_subgraphs:
                 if len(subgraph) % 2 == 1:
+                    print("Bad subgraph", subgraph)
                     return False
 
         return True
@@ -295,6 +357,16 @@ class FlagCode:
 
         return self._d
 
+    def x_stabilizer_weights(self):
+        weights, count = np.unique(np.sum(self.Hx, axis=1), return_counts=True)
+
+        return {w: c for w, c in zip(weights, count)}
+
+    def z_stabilizer_weights(self):
+        weights, count = np.unique(np.sum(self.Hz, axis=1), return_counts=True)
+
+        return {w: c for w, c in zip(weights, count)}
+
     def is_valid_css(self):
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
 
@@ -336,14 +408,25 @@ class FlagCode:
         return True
 
 
+def generate_random_parity_check_matrix(n_rows=3, n_cols=4):
+    matrix = []
+
+    while len(matrix) < n_cols:
+        col = np.random.choice([0, 1], n_rows)
+        if np.sum(col) % 2 == 0:
+            matrix.append(col)
+
+    return np.transpose(matrix)
+
+
 if __name__ == "__main__":
-    # code = Toric2DCode(2)
+    # code = Toric2DCode(4)
     # boundary_operators = [
     #     np.array(code.Hz.todense()),
     #     np.array(code.Hx.todense().T)
     # ]
     # print(boundary_operators)
-    # positions = None
+    positions = None
 
     # positions = [
     #     np.array(code.stabilizer_coordinates)[code.z_indices],
@@ -352,18 +435,37 @@ if __name__ == "__main__":
     # ]
 
     H = ring_code(3)
-    complex = HypergraphComplex([H, H, H])
+
+    H = np.zeros((1, 1))
+    while rank(H) == 0:
+        H = generate_random_parity_check_matrix(6, 8)
+
+    new_col = np.array([np.sum(H, axis=1) % 2]).T
+    if not np.all(new_col == 0):
+        H = np.hstack([H, new_col])
+
+    print(H)
+
+    complex = HypergraphComplex([H, H])
     boundary_operators = complex.boundary_operators
     positions = None
-    print(boundary_operators)
 
-    flag_code = FlagCode(boundary_operators, positions)
+    flag_code = FlagCode(
+        boundary_operators,
+        positions,
+        x=1,
+        z=1,
+        add_boundary_pins=False
+    )
+
     # flag_code.get_all_maximal_subgraphs([0, 2])
     print(f"Is it a valid pin code? {flag_code.is_pin_code_relation()}")
     print(f"Is it a valid CSS code? {flag_code.is_valid_css()}")
     print(f"n: {flag_code.n}")
     print(f"k: {flag_code.k}")
-    # print(f"X Logical: {flag_code.x_logicals}")
-    # print(f"Z Logical: {flag_code.z_logicals}")
-    # print(f"Distance: {flag_code.d}")
-    # print(f"Is triorthogonal: {flag_code.is_triorthogonal()}")
+    print("X stabilizer weights", flag_code.x_stabilizer_weights())
+    print("Z stabilizer weights", flag_code.z_stabilizer_weights())
+    print(f"X Logical: {flag_code.x_logicals}")
+    print(f"Z Logical: {flag_code.z_logicals}")
+    print(f"Distance: {flag_code.d}")
+    print(f"Is triorthogonal: {flag_code.is_triorthogonal()}")

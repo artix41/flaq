@@ -20,6 +20,19 @@ class HypergraphComplex:
 
         self.boundary_operators = self.construct_boundary_operators()
 
+        print("d_0", np.unique(np.sum(self.boundary_operators[0], axis=0)))
+        print("d_{-1}", np.unique(np.sum(self.boundary_operators[-1], axis=1)))
+
+        if not self.is_valid_complex():
+            raise ValueError("Not a valid complex")
+
+    def is_valid_complex(self):
+        for i in range(len(self.boundary_operators)-1):
+            if not np.all((self.boundary_operators[i] @ self.boundary_operators[i+1]) % 2 == 0):
+                return False
+
+        return True
+
     def construct_boundary_operators(self):
         boundary_operators = []
         space_labels = []
