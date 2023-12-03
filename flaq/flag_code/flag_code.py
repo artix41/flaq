@@ -210,27 +210,22 @@ class FlagCode:
 
             plt.show()
 
-    def get_all_rainbow_subgraphs(k: int):
+    def get_all_rainbow_subgraphs(k: int) -> Union[List[Set[int]], List[np.ndarray]]:
         """Get all subgraphs where each node is connected to k edges
-        of k different colors
+        of k different colors.
+
+        Parameters
+        ----------
+        k : int
+            Regularity parameter
+
+        Returns
+        -------
+        Union[List[Set[int]], List[np.ndarray]]
+            List of subgraphs, where each subgraph is specified by the set of nodes
+            it contains
         """
-        visited_nodes = set()
-        rainbow_subgraphs = []
-
-        def get_rainbow_subgraph(node: int):
-            if node in visited_nodes:
-                return {}
-
-            visited_nodes.add(node)
-            subgraph = {node}
-
-            adj_nodes = self.flag_adjacency[node].nonzero()[0]
-            for adj_node in adj_nodes:
-                if self.flag_adjacency[node, adj_node] in colors:
-                    subgraph.update(get_max_subgraph(adj_node))
-
-            return subgraph
-
+        pass
 
     def get_all_maximal_subgraphs(
         self,
