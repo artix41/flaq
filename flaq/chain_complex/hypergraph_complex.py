@@ -3,14 +3,13 @@ from itertools import combinations
 from typing import List
 
 from ldpc.codes import ring_code
-import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
-from scipy.sparse import csr_array
+
+from . import BaseComplex
 
 
-class HypergraphComplex:
-    def __init__(self, parity_check_matrices: List[np.ndarray]):
+class HypergraphComplex(BaseComplex):
+    def __init__(self, parity_check_matrices: List[np.ndarray], sanity_check=True):
         for H in parity_check_matrices:
             if not isinstance(H, np.ndarray):
                 raise ValueError("The matrices should be given as numpy arrays")
@@ -18,20 +17,7 @@ class HypergraphComplex:
         self.dimension = len(parity_check_matrices)
         self.space_dim = [[H.shape[1], H.shape[0]] for H in parity_check_matrices]
 
-        self.boundary_operators = self.construct_boundary_operators()
-
-        print("d_0", np.unique(np.sum(self.boundary_operators[0], axis=0)))
-        print("d_{-1}", np.unique(np.sum(self.boundary_operators[-1], axis=1)))
-
-        if not self.is_valid_complex():
-            raise ValueError("Not a valid complex")
-
-    def is_valid_complex(self):
-        for i in range(len(self.boundary_operators)-1):
-            if not np.all((self.boundary_operators[i] @ self.boundary_operators[i+1]) % 2 == 0):
-                return False
-
-        return True
+        super().__init__(sanity_check=sanity_check)
 
     def construct_boundary_operators(self):
         boundary_operators = []
@@ -74,21 +60,6 @@ class HypergraphComplex:
             boundary_operators.append(boundary_op.T)
 
         return boundary_operators
-
-    def draw_tanner_graph(self, index_boundary_operator=0):
-        graph = nx.algorithms.bipartite.from_biadjacency_matrix(
-            csr_array(self.boundary_operators[index_boundary_operator])
-        )
-        coordinates = nx.spring_layout(graph)
-        print(graph._node)
-
-        nx.draw(
-            graph, coordinates,
-            node_color='black', node_size=200, width=2,
-            with_labels=True, font_color='white', font_size=7
-        )
-
-        plt.show()
 
 
 if __name__ == "__main__":

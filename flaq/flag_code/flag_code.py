@@ -3,7 +3,7 @@ import sys
 from typing import List, Set, Tuple, Union
 
 from ldpc.mod2 import rank
-from ldpc.codes import ring_code
+from ldpc.codes import ring_code, hamming_code
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -210,14 +210,17 @@ class FlagCode:
 
             plt.show()
 
-    def get_all_rainbow_subgraphs(k: int) -> Union[List[Set[int]], List[np.ndarray]]:
+    def get_all_rainbow_subgraphs(
+        self,
+        colors: Set[int]
+    ) -> Union[List[Set[int]], List[np.ndarray]]:
         """Get all subgraphs where each node is connected to k edges
         of k different colors.
 
         Parameters
         ----------
-        k : int
-            Regularity parameter
+        colors : Set[int]
+            Set of colors that the subgraph should have at each node
 
         Returns
         -------
@@ -225,7 +228,25 @@ class FlagCode:
             List of subgraphs, where each subgraph is specified by the set of nodes
             it contains
         """
-        pass
+
+        k = len(colors)
+
+        # def get_rainbow_subgraphs(partial_subgraph, explorable_nodes):
+        #     if len(explorable_nodes) == 0:
+        #         return partial_subgraph
+
+        #     for node in explorable_nodes:
+        #         explored_colors = [colors[node, adj_node] for adj_node in partial_subgraph[node]]
+        #         remaining_colors = colors - set(explored_colors)
+
+        #         for adj_node in self.flag_adjacency[node].nonzero()[0]:
+        #             if self.flag_adjacency[node, adj_node] in remaining_colors:
+        #                 partial_subgraph[node].add(adj_node)
+        #                 partial_subgraph[adj_node].add(node)
+
+        #                 if
+
+
 
     def get_all_maximal_subgraphs(
         self,
@@ -414,6 +435,9 @@ def generate_random_parity_check_matrix(n_rows=3, n_cols=4):
     return np.transpose(matrix)
 
 
+# def generate_double_rep_code_matrix(n)
+
+
 if __name__ == "__main__":
     # code = Toric2DCode(4)
     # boundary_operators = [
@@ -429,19 +453,32 @@ if __name__ == "__main__":
     #     np.array(code.stabilizer_coordinates)[code.x_indices]
     # ]
 
-    H = ring_code(3)
+    # H = ring_code(3)
 
-    H = np.zeros((1, 1))
-    while rank(H) == 0:
-        H = generate_random_parity_check_matrix(6, 8)
+    # H = np.zeros((1, 1))
+    # while rank(H) == 0:
+    #     H = generate_random_parity_check_matrix(6, 8)
 
-    new_col = np.array([np.sum(H, axis=1) % 2]).T
-    if not np.all(new_col == 0):
-        H = np.hstack([H, new_col])
+    # H0 = ring_code(3)
+    # H1 = hamming_code(3)
 
-    print(H)
+    # new_col = np.array([np.sum(H1, axis=1) % 2]).T
+    # if not np.all(new_col == 0):
+    #     H = np.hstack([H1, new_col])
+
+    # new_row = np.sum(H1, axis=0) % 2
+    # if not np.all(new_row == 0):
+    #     print(H1.shape)
+    #     H1 = np.vstack([H1, new_row])
+
+    # print(H1)
+
+    H = np.ones((2, 4))
 
     complex = HypergraphComplex([H, H])
+
+    print(complex.boundary_operators[0])
+    print(complex.boundary_operators[1])
     boundary_operators = complex.boundary_operators
     positions = None
 
@@ -452,6 +489,9 @@ if __name__ == "__main__":
         z=1,
         add_boundary_pins=False
     )
+
+    np.savetxt("output/hx.csv", flag_code.Hx, delimiter=",", fmt="%d")
+    np.savetxt("output/hz.csv", flag_code.Hz, delimiter=",", fmt="%d")
 
     # flag_code.get_all_maximal_subgraphs([0, 2])
     print(f"Is it a valid pin code? {flag_code.is_pin_code_relation()}")
