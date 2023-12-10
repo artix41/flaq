@@ -58,8 +58,6 @@ class DoubleOpenSquareComplex(BaseComplex):
         n_edges = len(edge_coordinates)
         n_faces = len(face_coordinates)
 
-        print(n_vertices, n_edges, n_faces)
-
         # Face to edges operator
         delta_0 = np.zeros((n_edges, n_faces), dtype='uint8')
 

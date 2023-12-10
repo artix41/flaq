@@ -45,7 +45,6 @@ class BaseComplex(ABC):
             csr_array(self.boundary_operators[index_boundary_operator])
         )
         coordinates = nx.spring_layout(graph)
-        print(graph._node)
 
         nx.draw(
             graph, coordinates,
