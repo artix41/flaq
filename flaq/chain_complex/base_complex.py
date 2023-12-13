@@ -5,6 +5,7 @@ from typing import List
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+from pyvis.network import Network
 from scipy.sparse import csr_array
 
 
@@ -40,16 +41,29 @@ class BaseComplex(ABC):
 
         return self._boundary_operators
 
-    def draw_tanner_graph(self, index_boundary_operator=0):
+    def draw_tanner_graph(self, index_boundary_operator=0, notebook=False):
         graph = nx.algorithms.bipartite.from_biadjacency_matrix(
             csr_array(self.boundary_operators[index_boundary_operator])
         )
-        coordinates = nx.spring_layout(graph)
+        node_type = [graph.nodes[i]['bipartite'] for i in range(len(graph.nodes))]
 
-        nx.draw(
-            graph, coordinates,
-            node_color='black', node_size=200, width=2,
-            with_labels=True, font_color='white', font_size=7
-        )
+        graph = nx.convert_node_labels_to_integers(graph)
 
-        plt.show()
+        nt = Network(notebook=notebook, cdn_resources='remote')
+        nt.from_nx(graph)
+
+        for edge in nt.get_edges():
+            edge['width'] = 7
+
+        for node_id in nt.get_nodes():
+            node = nt.get_node(node_id)
+            node['label'] = str(node['id'])
+            node['shape'] = ['box', 'circle'][node_type[node_id]]
+            if not node_type[node_id]:
+                node['color'] = 'orange'
+
+            node['font'] = {'size': 45}
+
+        nt.show('nx.html')
+
+        return nt

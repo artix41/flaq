@@ -1,18 +1,83 @@
 from itertools import combinations
 import sys
-from typing import List, Set, Tuple, Union
+from typing import List, Set, Tuple, Union, Dict
 
+from copy import deepcopy
 from ldpc.mod2 import rank
 from ldpc.codes import ring_code, hamming_code
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from panqec.codes import Toric2DCode, Toric3DCode, Planar2DCode, Color666PlanarCode
+from pyvis.network import Network
 
 from flaq.utils import get_all_logicals
 from flaq.chain_complex import HypergraphComplex
 
 sys.setrecursionlimit(10000)
+
+
+class Graph:
+    def __init__(self, n_nodes: int):
+        self.n_nodes = n_nodes
+        self.adj_list = [set() for _ in range(n_nodes)]
+
+    def add_edge(self, node1: int, node2: int, color: int):
+        self.adj_list[node1].add((node2, color))
+        self.adj_list[node2].add((node1, color))
+
+    def remove_edge(self, node1: int, node2: int, color: int):
+        self.adj_list[node1].remove((node2, color))
+        self.adj_list[node2].remove((node1, color))
+
+    def copy(self):
+        new_graph = Graph(self.n_nodes)
+        new_graph.adj_list = deepcopy(self.adj_list)
+
+        return new_graph
+
+    def connected_colors(self, node):
+        return [adj_node[1] for adj_node in self.adj_list[node]]
+
+    def is_subgraph(self, bigger_graph):
+        answer = True
+        for node in range(self.n_nodes):
+            answer = answer and self.adj_list[node].issubset(bigger_graph[node])
+
+        return answer
+
+    def as_node_set(self):
+        return {node for node in range(self.n_nodes) if len(self.adj_list[node]) > 0}
+
+    def as_array(self):
+        array = np.zeros(self.n_nodes, dtype='uint8')
+        nodes = [node for node in range(self.n_nodes) if len(self.adj_list[node]) > 0]
+        array[nodes] = 1
+
+        return array
+
+    def __getitem__(self, index: int):
+        return self.adj_list[index]
+
+    def __repr__(self):
+        adj_dict = {}
+
+        for node in range(self.n_nodes):
+            if len(self.adj_list[node]) != 0:
+                adj_dict[node] = set(map(lambda x: x[0], self.adj_list[node]))
+
+        return f"Graph({adj_dict})"
+
+    def __hash__(self):
+        hashed_value = hash(tuple(map(
+            lambda nodes: tuple(sorted(nodes, key=lambda adj_node: adj_node[0])),
+            self.adj_list
+        )))
+
+        return hashed_value
+
+    def __eq__(self, g):
+        return (g.adj_list == self.adj_list)
 
 
 class FlagCode:
@@ -173,7 +238,8 @@ class FlagCode:
             return adjacent_flags
 
         self.n_flags = len(self.flags)
-        self.flag_adjacency = np.zeros((self.n_flags, self.n_flags), dtype=np.uint8)
+        self.flag_adjacency_matrix = np.zeros((self.n_flags, self.n_flags), dtype=np.uint8)
+        self.flag_adjacency_list = Graph(self.n_flags)
         explored_flags = set()
 
         def explore_graph_from_flag(flag: Tuple[int]):
@@ -186,14 +252,16 @@ class FlagCode:
                 for next_flag in get_adjacent_flags(flag, level):
                     if next_flag != flag:
                         idx1, idx2 = self.flag_to_index[flag], self.flag_to_index[next_flag]
-                        self.flag_adjacency[idx1, idx2] = level + 1
-                        self.flag_adjacency[idx2, idx1] = level + 1
+                        self.flag_adjacency_matrix[idx1, idx2] = level + 1
+                        self.flag_adjacency_matrix[idx2, idx1] = level + 1
+
+                        self.flag_adjacency_list.add_edge(idx1, idx2, level + 1)
 
                         explore_graph_from_flag(next_flag)
 
         explore_graph_from_flag(self.flags[0])
 
-        self.graph = nx.from_numpy_array(self.flag_adjacency)
+        self.graph = nx.from_numpy_array(self.flag_adjacency_matrix)
 
         edges, weights = zip(*nx.get_edge_attributes(self.graph, 'weight').items())
 
@@ -212,7 +280,8 @@ class FlagCode:
 
     def get_all_rainbow_subgraphs(
         self,
-        colors: Set[int]
+        colors: Union[Set[int], List[int]],
+        return_arrays: bool = False
     ) -> Union[List[Set[int]], List[np.ndarray]]:
         """Get all subgraphs where each node is connected to k edges
         of k different colors.
@@ -229,24 +298,104 @@ class FlagCode:
             it contains
         """
 
-        k = len(colors)
+        colors = set(colors)
 
-        # def get_rainbow_subgraphs(partial_subgraph, explorable_nodes):
-        #     if len(explorable_nodes) == 0:
-        #         return partial_subgraph
+        visited_subgraphs = set()
 
-        #     for node in explorable_nodes:
-        #         explored_colors = [colors[node, adj_node] for adj_node in partial_subgraph[node]]
-        #         remaining_colors = colors - set(explored_colors)
+        def get_rainbow_subgraphs(
+            partial_subgraph: Graph,
+            explorable_nodes: Set[int],
+            finished_nodes: Set[int]
+        ):
+            if len(explorable_nodes) == 0:
+                return {partial_subgraph.copy()}
 
-        #         for adj_node in self.flag_adjacency[node].nonzero()[0]:
-        #             if self.flag_adjacency[node, adj_node] in remaining_colors:
-        #                 partial_subgraph[node].add(adj_node)
-        #                 partial_subgraph[adj_node].add(node)
+            # print("\n===== New exploration =====\n")
+            # print("Partial subgraph", partial_subgraph)
+            # print("Explorable nodes", explorable_nodes)
+            # print("Finished nodes", finished_nodes)
 
-        #                 if
+            visited_subgraphs.add(partial_subgraph.copy())
 
+            set_rainbow_subgraphs = set()
 
+            for node in explorable_nodes.copy():
+                # print("\nExploring node", node)
+                explored_colors = {color for _, color in partial_subgraph[node]}
+                remaining_colors = colors - explored_colors
+
+                for adj_node, color in self.flag_adjacency_list[node]:
+                    if (color in remaining_colors
+                            and adj_node not in finished_nodes
+                            and color not in partial_subgraph.connected_colors(adj_node)):
+                        prev_explorable_nodes = explorable_nodes.copy()
+                        prev_finished_nodes = finished_nodes.copy()
+
+                        partial_subgraph.add_edge(node, adj_node, color)
+                        explorable_nodes.add(adj_node)
+
+                        if len(partial_subgraph.connected_colors(adj_node)) == len(colors):
+                            explorable_nodes.remove(adj_node)
+                            finished_nodes.add(adj_node)
+
+                        if len(partial_subgraph.connected_colors(node)) == len(colors):
+                            explorable_nodes.remove(node)
+                            finished_nodes.add(node)
+
+                        subgraph_of_rainbow = False
+                        for rainbow in set_rainbow_subgraphs:
+                            subgraph_of_rainbow = (
+                                subgraph_of_rainbow or partial_subgraph.is_subgraph(rainbow)
+                            )
+
+                        if partial_subgraph not in visited_subgraphs and not subgraph_of_rainbow:
+                            # print("Adj node before", adj_node)
+                            subgraphs = get_rainbow_subgraphs(
+                                partial_subgraph,
+                                explorable_nodes,
+                                finished_nodes
+                            )
+                            # print("Adj node after", adj_node)
+                            # print("Subgraphs: ", subgraphs)
+                            set_rainbow_subgraphs.update(subgraphs)
+                        # else:
+                            # print("Already visited")
+
+                        partial_subgraph.remove_edge(node, adj_node, color)
+
+                        explorable_nodes = prev_explorable_nodes
+                        finished_nodes = prev_finished_nodes
+
+            # print("\nReturn", set_rainbow_subgraphs)
+            return set_rainbow_subgraphs
+
+        subgraphs = set()
+        for i in range(self.n_flags):
+            partial_subgraph = Graph(self.n_flags)
+            explorable_nodes = {i}
+            finished_nodes = set()
+
+            node_included_in_rainbow = False
+            for rainbow in subgraphs:
+                if len(rainbow[i]) > 0:
+                    node_included_in_rainbow = True
+
+            if not node_included_in_rainbow:
+                subgraphs.update(
+                    get_rainbow_subgraphs(partial_subgraph, explorable_nodes, finished_nodes)
+                )
+
+        if return_arrays:
+            subgraphs_output = list(map(
+                np.array,
+                list({
+                    tuple(subgraph.as_array()) for subgraph in subgraphs
+                })
+            ))
+        else:
+            subgraphs_output = set(tuple(sorted(subgraph.as_node_set())) for subgraph in subgraphs)
+
+        return subgraphs_output
 
     def get_all_maximal_subgraphs(
         self,
@@ -263,14 +412,13 @@ class FlagCode:
             visited_nodes.add(node)
             subgraph = {node}
 
-            adj_nodes = self.flag_adjacency[node].nonzero()[0]
-            for adj_node in adj_nodes:
-                if self.flag_adjacency[node, adj_node] in colors:
+            for adj_node, color in self.flag_adjacency_list[node]:
+                if color in colors:
                     subgraph.update(get_max_subgraph(adj_node))
 
             return subgraph
 
-        for node in range(len(self.flag_adjacency)):
+        for node in range(self.n_flags):
             if node not in visited_nodes:
                 subgraph_set = get_max_subgraph(node)
 
@@ -294,16 +442,33 @@ class FlagCode:
 
         return True
 
-    def get_stabilizers(self, n_pinned: int) -> np.ndarray:
-        max_subgraphs = []
+    def get_stabilizers(
+        self,
+        n_pinned: int,
+        stabilizer_types: Dict[Tuple, str] = None
+    ) -> np.ndarray:
+
+        if stabilizer_types is None:
+            stabilizer_types = {
+                tuple(pinned_colors): 'maximal'
+                for pinned_colors in combinations(self.all_colors, n_pinned)
+            }
+
+        subgraphs = []
+
         for pinned_colors in combinations(self.all_colors, n_pinned):
             free_colors = set(self.all_colors) - set(pinned_colors)
 
-            max_subgraphs.extend(
-                self.get_all_maximal_subgraphs(free_colors, return_arrays=True)
+            if stabilizer_types[tuple(pinned_colors)] == 'maximal':
+                get_subgraphs = self.get_all_maximal_subgraphs
+            else:
+                get_subgraphs = self.get_all_rainbow_subgraphs
+
+            subgraphs.extend(
+                get_subgraphs(free_colors, return_arrays=True)
             )
 
-        return np.array(max_subgraphs)
+        return np.array(subgraphs)
 
     def get_logicals(self) -> np.ndarray:
         logicals = get_all_logicals(self.Hx, self.Hz, self.k)
@@ -330,14 +495,24 @@ class FlagCode:
     @property
     def Hx(self):
         if self._Hx is None:
-            self._Hx = self.get_stabilizers(self.x)
+            stabilizer_types = {
+                tuple(pinned_colors): 'maximal'
+                for pinned_colors in combinations(self.all_colors, self.x)
+            }
+
+            self._Hx = self.get_stabilizers(self.x, stabilizer_types)
 
         return self._Hx
 
     @property
     def Hz(self):
         if self._Hz is None:
-            self._Hz = self.get_stabilizers(self.z)
+            stabilizer_types = {
+                tuple(pinned_colors): 'rainbow'
+                for pinned_colors in combinations(self.all_colors, self.z)
+            }
+
+            self._Hz = self.get_stabilizers(self.z, stabilizer_types)
 
         return self._Hz
 
@@ -422,6 +597,33 @@ class FlagCode:
         print("It is two-logical triorthogonal")
 
         return True
+
+    def draw(
+        self,
+        notebook: bool = True,
+        edge_width: int = 7,
+        node_size: int = 45,
+        colors: Dict[int, str] = None
+    ):
+        nt = Network(notebook=notebook, cdn_resources='in_line')
+        nt.from_nx(self.graph)
+
+        if colors is None:
+            colors = {1: 'blue', 2: 'green', 3: 'red', 4: 'yellow'}
+
+        for edge in nt.get_edges():
+            edge['color'] = colors[self.flag_adjacency_matrix[edge['from'], edge['to']]]
+            edge['width'] = edge_width
+
+        for node_id in nt.get_nodes():
+            node = nt.get_node(node_id)
+            node['label'] = str(node['id'])
+            node['shape'] = 'circle'
+            node['font'] = {'size': node_size}
+
+        nt.show('nx.html')
+
+        return nt
 
 
 def generate_random_parity_check_matrix(n_rows=3, n_cols=4):

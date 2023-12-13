@@ -4,14 +4,19 @@ import numpy as np
 from . import BaseComplex
 
 
-class DoubleOpenSquareComplex(BaseComplex):
-    """Chain complex built from a square complex with open boundary conditions,
-    by duplicating each vertex.
+class DoubleSquareComplex(BaseComplex):
+    """Chain complex built from a square complex by duplicating each vertex.
     Each edge (or rather hyperedge) in the bulk of the complex is then connected
     to four vertices
     """
 
-    def __init__(self, Lx: int = 2, Ly: int = 2, sanity_check=True):
+    def __init__(
+        self,
+        Lx: int = 2,
+        Ly: int = 2,
+        periodic: bool = False,
+        sanity_check: bool = True
+    ):
         """Constructor of the double square complex
 
         Parameters
@@ -20,9 +25,14 @@ class DoubleOpenSquareComplex(BaseComplex):
             Size of the complex (number of faces) in the horizontal direction, by default 2
         Ly : int, optional
             Size of the complex (number of faces) in the vertical direction, by default 2
+        periodic: bool, optional
+            Whether the complex should have open or periodic boundary conditions
+        sanity_check: bool, optional
+            Whether to run sanity checks, raising an error if the complex is not valid
         """
         self.Lx = Lx
         self.Ly = Ly
+        self.periodic = periodic
 
         super().__init__(sanity_check=sanity_check)
 
@@ -30,8 +40,12 @@ class DoubleOpenSquareComplex(BaseComplex):
         boundary_operators = []
 
         vertex_coordinates = []
-        for x in range(0, 2*self.Lx+1, 2):
-            for y in range(0, 2*self.Ly+1, 2):
+        max_vertex_coord = {
+            'x': 2*self.Lx+int(not self.periodic),
+            'y': 2*self.Lx+int(not self.periodic)
+        }
+        for x in range(0, max_vertex_coord['x'], 2):
+            for y in range(0, max_vertex_coord['y'], 2):
                 vertex_coordinates.append((x, y, 0))
                 vertex_coordinates.append((x, y, 1))
 
@@ -52,6 +66,7 @@ class DoubleOpenSquareComplex(BaseComplex):
             for y in range(1, 2*self.Ly, 2):
                 face_coordinates.append((x, y))
 
+
         vertex_index = {coord: i for i, coord in enumerate(vertex_coordinates)}
         edge_index = {coord: i for i, coord in enumerate(edge_coordinates)}
         n_vertices = len(vertex_coordinates)
@@ -66,6 +81,8 @@ class DoubleOpenSquareComplex(BaseComplex):
 
             for d in delta:
                 edge_coord = (face_coord[0] + d[0], face_coord[1] + d[1])
+                if self.periodic:
+                    edge_coord = (edge_coord[0] % (2*self.Lx), edge_coord[1] % (2*self.Ly))
 
                 if edge_coord in edge_coordinates:
                     delta_0[edge_index[edge_coord], i_face] = 1
@@ -80,13 +97,18 @@ class DoubleOpenSquareComplex(BaseComplex):
                 delta = [(-1, 0), (1, 0)]
 
             for d in delta:
-                vertex_coord = (edge_coord[0] + d[0], edge_coord[1] + d[1], 0)
-                if vertex_coord in vertex_coordinates:
-                    delta_1[vertex_index[vertex_coord], i_edge] = 1
+                vertex_coord1 = (edge_coord[0] + d[0], edge_coord[1] + d[1], 0)
+                vertex_coord2 = (edge_coord[0] + d[0], edge_coord[1] + d[1], 1)
 
-                vertex_coord = (edge_coord[0] + d[0], edge_coord[1] + d[1], 1)
-                if vertex_coord in vertex_coordinates:
-                    delta_1[vertex_index[vertex_coord], i_edge] = 1
+                for vertex_coord in [vertex_coord1, vertex_coord2]:
+                    if self.periodic:
+                        vertex_coord = (
+                            vertex_coord[0] % (2*self.Lx),
+                            vertex_coord[1] % (2*self.Ly),
+                            vertex_coord[2]
+                        )
+                    if vertex_coord in vertex_coordinates:
+                        delta_1[vertex_index[vertex_coord], i_edge] = 1
 
         boundary_operators = [delta_1, delta_0]
 
