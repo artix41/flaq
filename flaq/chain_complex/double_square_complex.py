@@ -66,7 +66,6 @@ class DoubleSquareComplex(BaseComplex):
             for y in range(1, 2*self.Ly, 2):
                 face_coordinates.append((x, y))
 
-
         vertex_index = {coord: i for i, coord in enumerate(vertex_coordinates)}
         edge_index = {coord: i for i, coord in enumerate(edge_coordinates)}
         n_vertices = len(vertex_coordinates)

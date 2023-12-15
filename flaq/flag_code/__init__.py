@@ -1,1 +1,1 @@
-from .flag_code import FlagCode  # noqa
+from .flag_code import FlagCode, make_even, random_code  # noqa
