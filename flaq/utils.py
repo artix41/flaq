@@ -66,6 +66,7 @@ def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None):
         if len(logicals) == k:
             break
 
+    print()
     print("Done")
 
     return logicals

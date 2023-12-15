@@ -1,6 +1,6 @@
 from itertools import combinations
 import sys
-from typing import List, Set, Tuple, Union, Dict
+from typing import List, Set, Tuple, Union, Dict, Optional
 
 from copy import deepcopy
 from ldpc.mod2 import rank
@@ -26,6 +26,10 @@ class Graph:
     def remove_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].remove((node2, color))
         self.adj_list[node2].remove((node1, color))
+
+    def merge_with(self, other_graph: "Graph"):
+        for node in range(self.n_nodes):
+            self.adj_list[node] = self[node].union(other_graph[node])
 
     def copy(self):
         new_graph = Graph(self.n_nodes)
@@ -81,11 +85,12 @@ class FlagCode:
     def __init__(
         self,
         boundary_operators: List[np.ndarray],
-        cell_positions: List[List[Tuple]] = None,
+        cell_positions: Optional[List[List[Tuple]]] = None,
         x: int = 1,
         z: int = 1,
-        add_boundary_pins=True,
-        verbose=False
+        add_boundary_pins: bool = True,
+        stabilizer_types: Optional[Dict[str, Dict[Tuple, str]]] = None,
+        verbose: bool = False
     ):
         """Flag code constructor
 
@@ -115,6 +120,7 @@ class FlagCode:
         self.all_colors = list(range(1, self.n_colors+1))
         self.x = x
         self.z = z
+        self.stabilizer_types = stabilizer_types
         self.verbose = verbose
 
         if x + z > self.dimension:
@@ -128,6 +134,21 @@ class FlagCode:
                 raise ValueError(
                     f"Incorrect dimensions for input adjacency matrices {i} and {i+1}"
                 )
+
+        if self.stabilizer_types is None:
+            self.stabilizer_types = {
+                'X': {
+                    tuple(pinned_colors): 'maximal'
+                    for pinned_colors in combinations(self.all_colors, self.x)
+                },
+                'Z': {
+                    tuple(pinned_colors): 'maximal'
+                    for pinned_colors in combinations(self.all_colors, self.z)
+                }
+            }
+
+        if set(self.stabilizer_types.keys()) != {'X', 'Z'}:
+            raise ValueError("'stabilizer_types' should have keys 'X' and 'Z'")
 
         self.has_boundary_vertex = False
         self.has_boundary_cell = False
@@ -284,7 +305,8 @@ class FlagCode:
     def get_all_rainbow_subgraphs(
         self,
         colors: Union[Set[int], List[int]],
-        return_arrays: bool = False
+        graph: Graph = None,
+        return_format: str = "set"
     ) -> Union[List[Set[int]], List[np.ndarray]]:
         """Get all subgraphs where each node is connected to k edges
         of k different colors.
@@ -300,6 +322,15 @@ class FlagCode:
             List of subgraphs, where each subgraph is specified by the set of nodes
             it contains
         """
+
+        if return_format not in ['set', 'graph', 'array']:
+            raise ValueError(
+                f"'return_format' must take value in ['set', 'graph', 'array'],"
+                f"not {return_format}"
+            )
+
+        if graph is None:
+            graph = self.flag_graph
 
         colors = set(colors)
 
@@ -328,11 +359,11 @@ class FlagCode:
                 explored_colors = {color for _, color in partial_subgraph[node]}
                 remaining_colors = colors - explored_colors
 
-                for adj_node, color in self.flag_graph[node]:
+                for adj_node, color in graph[node]:
                     if (color in remaining_colors
                             and not (adj_node in finished_nodes)
                             and color not in partial_subgraph.connected_colors(adj_node)
-                            and colors.issubset(self.flag_graph.connected_colors(adj_node))):
+                            and colors.issubset(graph.connected_colors(adj_node))):
                         prev_explorable_nodes = explorable_nodes.copy()
                         prev_finished_nodes = finished_nodes.copy()
 
@@ -377,13 +408,13 @@ class FlagCode:
 
         max_subgraphs = set()
         for node in range(self.n_flags):
-            print(f"Explore node {node+1} / {self.n_flags}", end='\r')
+            # print(f"Explore node {node+1} / {self.n_flags}", end='\r')
             partial_subgraph = Graph(self.n_flags)
             explorable_nodes = {node}
             finished_nodes = set()
 
             has_all_colors = (
-                colors.issubset(self.flag_graph.connected_colors(node))
+                colors.issubset(graph.connected_colors(node))
             )
 
             node_included_in_max_subgraph = False
@@ -396,54 +427,66 @@ class FlagCode:
                 max_subgraphs.update(
                     find_rainbow_subgraphs(partial_subgraph, explorable_nodes, finished_nodes)
                 )
-        print()
 
-        if return_arrays:
+        if return_format == 'array':
             subgraphs_output = list(map(
                 np.array,
                 list({
                     tuple(subgraph.as_array()) for subgraph in rainbow_subgraphs
                 })
             ))
-        else:
+        elif return_format == 'set':
             subgraphs_output = {
                 tuple(sorted(subgraph.as_node_set()))
                 for subgraph in rainbow_subgraphs
             }
+        else:
+            subgraphs_output = rainbow_subgraphs
 
         return subgraphs_output
 
     def get_all_maximal_subgraphs(
         self,
         colors: Set[int],
-        return_arrays: bool = False
+        return_format: str = "set"
     ) -> Union[List[Set[int]], List[np.ndarray]]:
+
+        if return_format not in ['set', 'graph', 'array']:
+            raise ValueError(
+                f"'return_format' must take value in ['set', 'graph', 'array'],"
+                f"not {return_format}"
+            )
+
         visited_nodes = set()
         maximal_subgraphs = []
 
         def get_max_subgraph(node):
             if node in visited_nodes:
-                return {}
+                return Graph(self.n_flags)
 
             visited_nodes.add(node)
-            subgraph = {node}
+            subgraph = Graph(self.n_flags)
 
             for adj_node, color in self.flag_graph[node]:
                 if color in colors:
-                    subgraph.update(get_max_subgraph(adj_node))
+                    adj_max_subgraph = get_max_subgraph(adj_node)
+                    subgraph.merge_with(adj_max_subgraph)
+                    subgraph.add_edge(node, adj_node, color)
 
             return subgraph
 
         for node in range(self.n_flags):
             if node not in visited_nodes:
-                subgraph_set = get_max_subgraph(node)
+                subgraph = get_max_subgraph(node)
 
-                if return_arrays:
+                if return_format == 'array':
                     subgraph_array = np.zeros(self.n_flags, dtype='uint8')
-                    subgraph_array[list(subgraph_set)] = 1
+                    subgraph_array[list(subgraph.as_node_set())] = 1
                     maximal_subgraphs.append(subgraph_array)
+                elif return_format == 'set':
+                    maximal_subgraphs.append(subgraph.as_node_set())
                 else:
-                    maximal_subgraphs.append(subgraph_set)
+                    maximal_subgraphs.append(subgraph)
 
         # print("Maximal subgraphs\n", maximal_subgraphs)
         return maximal_subgraphs
@@ -464,27 +507,33 @@ class FlagCode:
         stabilizer_types: Dict[Tuple, str] = None
     ) -> np.ndarray:
 
-        if stabilizer_types is None:
-            stabilizer_types = {
-                tuple(pinned_colors): 'maximal'
-                for pinned_colors in combinations(self.all_colors, n_pinned)
-            }
-
-        subgraphs = []
+        maximal_subgraphs = {}
+        final_subgraphs = []
 
         for pinned_colors in combinations(self.all_colors, n_pinned):
             free_colors = set(self.all_colors) - set(pinned_colors)
 
-            if stabilizer_types[tuple(pinned_colors)] == 'maximal':
-                get_subgraphs = self.get_all_maximal_subgraphs
-            else:
-                get_subgraphs = self.get_all_rainbow_subgraphs
-
-            subgraphs.extend(
-                get_subgraphs(free_colors, return_arrays=True)
+            maximal_subgraphs[pinned_colors] = self.get_all_maximal_subgraphs(
+                free_colors, return_format='graph'
             )
+            if stabilizer_types[tuple(pinned_colors)] == 'maximal':
+                final_subgraphs.extend([
+                    max_subgraph.as_array()
+                    for max_subgraph in maximal_subgraphs[pinned_colors]
+                ])
+            else:
+                n_max_subgraphs = len(maximal_subgraphs[pinned_colors])
+                for i, max_graph in enumerate(maximal_subgraphs[pinned_colors]):
+                    print(
+                        f"Explore maximal subgraph {i+1} / {n_max_subgraphs}"
+                        f" with colors {free_colors}",
+                        end='\r'
+                    )
+                    final_subgraphs.extend(self.get_all_rainbow_subgraphs(
+                        free_colors, graph=max_graph, return_format='array'
+                    ))
 
-        return np.array(subgraphs)
+        return np.array(final_subgraphs)
 
     def get_logicals(self) -> np.ndarray:
         logicals = get_all_logicals(self.Hx, self.Hz, self.k)
@@ -511,24 +560,14 @@ class FlagCode:
     @property
     def Hx(self):
         if self._Hx is None:
-            stabilizer_types = {
-                tuple(pinned_colors): 'maximal'
-                for pinned_colors in combinations(self.all_colors, self.x)
-            }
-
-            self._Hx = self.get_stabilizers(self.x, stabilizer_types)
+            self._Hx = self.get_stabilizers(self.x, self.stabilizer_types['X'])
 
         return self._Hx
 
     @property
     def Hz(self):
         if self._Hz is None:
-            stabilizer_types = {
-                tuple(pinned_colors): 'rainbow'
-                for pinned_colors in combinations(self.all_colors, self.z)
-            }
-
-            self._Hz = self.get_stabilizers(self.z, stabilizer_types)
+            self._Hz = self.get_stabilizers(self.z, self.stabilizer_types['Z'])
 
         return self._Hz
 
@@ -565,14 +604,16 @@ class FlagCode:
         return self._d
 
     def x_stabilizer_weights(self):
-        weights, count = np.unique(np.sum(self.Hx, axis=1), return_counts=True)
-
-        return {w: c for w, c in zip(weights, count)}
+        return get_operator_weights(self.Hx)
 
     def z_stabilizer_weights(self):
-        weights, count = np.unique(np.sum(self.Hz, axis=1), return_counts=True)
+        return get_operator_weights(self.Hz)
 
-        return {w: c for w, c in zip(weights, count)}
+    def x_logical_weights(self):
+        return get_operator_weights(self.x_logicals)
+
+    def z_logical_weights(self):
+        return get_operator_weights(self.z_logicals)
 
     def is_valid_css(self):
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
@@ -629,8 +670,12 @@ class FlagCode:
             colors = {1: 'blue', 2: 'green', 3: 'red', 4: 'yellow'}
 
         for edge in nt.get_edges():
-            edge['color'] = colors[self.flag_adjacency_matrix[edge['from'], edge['to']]]
+            color_id = self.flag_adjacency_matrix[edge['from'], edge['to']]
+            edge['color'] = colors[color_id]
             edge['width'] = edge_width
+            if color_id not in restricted_colors:
+                edge['hidden'] = True
+                edge['physics'] = False
 
         for node_id in nt.get_nodes():
             node = nt.get_node(node_id)
@@ -664,3 +709,9 @@ def make_even(H):
         H = np.vstack([H, new_row])
 
     return H
+
+
+def get_operator_weights(operator: np.ndarray):
+    weights, count = np.unique(np.sum(operator, axis=1), return_counts=True)
+
+    return {w: c for w, c in zip(weights, count)}
