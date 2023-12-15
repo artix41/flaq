@@ -2,11 +2,12 @@ from abc import ABC, abstractmethod
 
 from typing import List
 
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
 from scipy.sparse import csr_array
+
+from flaq.utils import get_all_logicals
 
 
 class BaseComplex(ABC):
@@ -40,6 +41,24 @@ class BaseComplex(ABC):
             self._boundary_operators = self.construct_boundary_operators()
 
         return self._boundary_operators
+
+    def get_distance(self, left_index=0, verbose=False):
+        """Get the distance of the code corresponding to the complex in-between
+        left_index and left_index+2
+        """
+
+        logicals = get_all_logicals(
+            self.boundary_operators[left_index],
+            self.boundary_operators[left_index+1].T,
+            verbose=verbose
+        )
+
+        d = min(
+            np.min(np.sum(logicals['X'], axis=1)),
+            np.min(np.sum(logicals['Z'], axis=1))
+        )
+
+        return d
 
     def draw_tanner_graph(self, index_boundary_operator=0, notebook=False):
         graph = nx.algorithms.bipartite.from_biadjacency_matrix(

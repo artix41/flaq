@@ -3,11 +3,16 @@ from ldpc.mod2 import rank, nullspace
 import numpy as np
 
 
-def get_all_logicals(Hx, Hz, k=None):
+def log(*args, verbose=False, **kwargs):
+    if verbose:
+        print(*args, **kwargs)
+
+
+def get_all_logicals(Hx, Hz, k=None, verbose=False):
     min_x_logicals = []
     min_z_logicals = []
 
-    arbitrary_x_logicals = get_arbitrary_logicals(Hx, Hz, 'X', k)
+    arbitrary_x_logicals = get_arbitrary_logicals(Hx, Hz, 'X', k, verbose=verbose)
 
     for anticommuting_x_logical in arbitrary_x_logicals:
         min_z_logicals.append(get_minimum_logical(Hx, anticommuting_x_logical))
@@ -39,8 +44,10 @@ def get_minimum_logical(H, anticommuting_logical):
     return predicted_logical_binary
 
 
-def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None):
-    print(f"Get logicals {pauli}")
+def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None, verbose=False):
+    if verbose:
+        log(f"Get logicals {pauli}", verbose=verbose)
+
     if pauli == 'X':
         H = [Hx, Hz]
     else:
@@ -54,7 +61,7 @@ def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None):
 
     logicals = []
     for i, s in enumerate(augmented_H):
-        print(f"{i} / {len(augmented_H)}", end="\r")
+        log(f"{i} / {len(augmented_H)}", end="\r", verbose=verbose)
 
         new_H0 = np.vstack([H[0], s])
         if rank(new_H0) > rank_H0:
@@ -66,7 +73,7 @@ def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None):
         if len(logicals) == k:
             break
 
-    print()
-    print("Done")
+    log(verbose=verbose)
+    log("Done", verbose=verbose)
 
     return logicals

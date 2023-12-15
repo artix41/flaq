@@ -57,6 +57,24 @@ class Graph:
 
         return array
 
+    def get_neighborhood_nodes(self, nodes: Union[Set, List], depth: int):
+        explorable_nodes = set(nodes.copy())
+        visited_nodes = set()
+
+        current_depth = 0
+        while len(explorable_nodes) > 0 and current_depth <= depth:
+            for node in explorable_nodes.copy():
+                explorable_nodes.remove(node)
+                visited_nodes.add(node)
+
+                for adj_node, _ in self[node]:
+                    if adj_node not in visited_nodes:
+                        explorable_nodes.add(adj_node)
+
+            current_depth += 1
+
+        return visited_nodes
+
     def __getitem__(self, index: int):
         return self.adj_list[index]
 
@@ -436,10 +454,10 @@ class FlagCode:
                 })
             ))
         elif return_format == 'set':
-            subgraphs_output = {
-                tuple(sorted(subgraph.as_node_set()))
+            subgraphs_output = [
+                subgraph.as_node_set()
                 for subgraph in rainbow_subgraphs
-            }
+            ]
         else:
             subgraphs_output = rainbow_subgraphs
 
@@ -658,22 +676,33 @@ class FlagCode:
     def draw(
         self,
         restricted_colors: List[int] = None,
+        restricted_nodes: List[int] = None,
+        restricted_depth: int = 0,
         notebook: bool = True,
         edge_width: int = 7,
         node_size: int = 45,
         colors: Dict[int, str] = None
     ):
-        nt = Network(notebook=notebook, cdn_resources='in_line')
+        nt = Network(notebook=notebook, cdn_resources='in_line', filter_menu=True)
         nt.from_nx(self.nx_graph)
 
         if colors is None:
             colors = {1: 'blue', 2: 'green', 3: 'red', 4: 'yellow'}
 
+        if restricted_nodes is None:
+            restricted_nodes = list(range(self.n_flags))
+
+        restricted_nodes = self.flag_graph.get_neighborhood_nodes(
+            restricted_nodes, restricted_depth
+        )
+
         for edge in nt.get_edges():
             color_id = self.flag_adjacency_matrix[edge['from'], edge['to']]
             edge['color'] = colors[color_id]
             edge['width'] = edge_width
-            if color_id not in restricted_colors:
+            if (color_id not in restricted_colors
+                    or edge['from'] not in restricted_nodes
+                    or edge['to'] not in restricted_nodes):
                 edge['hidden'] = True
                 edge['physics'] = False
 
@@ -682,6 +711,12 @@ class FlagCode:
             node['label'] = str(node['id'])
             node['shape'] = 'circle'
             node['font'] = {'size': node_size}
+
+            if node_id not in restricted_nodes:
+                node['hidden'] = True
+                node['physics'] = False
+
+        nt.show_buttons(filter_=['physics'])
 
         nt.show('nx.html')
 
