@@ -1,3 +1,3 @@
-# Quantum Rainbow codes
+# Flaq
 
-Library to study quantum rainbow codes
+Library to study flag-based quantum codes, such as rainbow, pin and color codes
