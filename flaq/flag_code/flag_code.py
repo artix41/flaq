@@ -4,7 +4,6 @@ from typing import List, Set, Tuple, Union, Dict, Optional
 
 from copy import deepcopy
 from ldpc.mod2 import rank
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
@@ -104,8 +103,8 @@ class FlagCode:
         self,
         boundary_operators: List[np.ndarray],
         cell_positions: Optional[List[List[Tuple]]] = None,
-        x: int = 1,
-        z: int = 1,
+        x: int = 2,
+        z: int = 2,
         add_boundary_pins: bool = True,
         stabilizer_types: Optional[Dict[str, Dict[Tuple, str]]] = None,
         verbose: bool = False
@@ -116,12 +115,19 @@ class FlagCode:
         ----------
         boundary_operators : List[np.ndarray]
             List of boundary operators for the input D-dimensional chain complex
-        cell_positions : _type_, optional
-            , by default None
+        cell_positions : List[List[Tuple]], optional
+            For each level, list of positions as 2-tuples (x, y)
+            for all the cells at that level. By default None
         x : int, optional
-            Size of Pauli X pinned set types (i.e. x in x-pinned set), by default 1
+            Number of colors of X stabilizers subgraphs, by default 2
         z : int, optional
-            Size of Pauli Z pinned set types (i.e. z in z-pinned set), by default 2
+            Number of colors of Z stabilizers subgraphs, by default 2
+        add_boundary_pins: bool, optional
+            If True, add some boundary pins to make the 0-cells and D-cells even-weight
+            (warning: it tends to increase the number of qubits by a large amount).
+            By default False.
+        verbose: bool, optional
+            If True, print some information when running the code
         """
         for H in boundary_operators:
             if not isinstance(H, np.ndarray):
@@ -141,10 +147,16 @@ class FlagCode:
         self.stabilizer_types = stabilizer_types
         self.verbose = verbose
 
-        if x + z > self.dimension:
+        if x < 2 or z < 2:
+            raise ValueError("x and z must be greater than 2")
+        if x > self.dimension or z > self.dimension:
             raise ValueError(
-                f"x+z must be below the dimension. "
-                f"Currently {x}+{z} > {self.dimension}"
+                f"x and z can't be strictly greater than the dimension of the system"
+                f"(i.e. {self.dimension})"
+            )
+        if x + z < self.dimension+2:
+            raise ValueError(
+                f"x+z must be above D+2. Currently {x}+{z} < {self.dimension}+2"
             )
 
         for i in range(self.dimension-1):
@@ -156,12 +168,12 @@ class FlagCode:
         if self.stabilizer_types is None:
             self.stabilizer_types = {
                 'X': {
-                    tuple(pinned_colors): 'maximal'
-                    for pinned_colors in combinations(self.all_colors, self.x)
+                    tuple(free_colors): 'maximal'
+                    for free_colors in combinations(self.all_colors, self.n_levels - self.x)
                 },
                 'Z': {
-                    tuple(pinned_colors): 'maximal'
-                    for pinned_colors in combinations(self.all_colors, self.z)
+                    tuple(free_colors): 'maximal'
+                    for free_colors in combinations(self.all_colors, self.n_levels - self.z)
                 }
             }
 
@@ -191,14 +203,18 @@ class FlagCode:
         self._x_logicals: np.ndarray = None
         self._z_logicals: np.ndarray = None
 
-        self.construct_graph(show=False)
+        self.construct_graph()
 
     def log(self, *args, **kwargs):
+        """Print function, conditioned on the self.verbose attribute.
+        Takes all the arguments of the standard print function
+        """
         if self.verbose:
             print(*args, **kwargs)
 
     def add_boundary_pins(self):
-        # print(self.boundary_operators[0].shape)
+        """Changes the first and last boundary operators to make all the weights even"""
+
         new_column = np.array([np.sum(self.boundary_operators[-1], axis=1) % 2]).T
 
         if not np.all(new_column == 0):
@@ -224,7 +240,7 @@ class FlagCode:
             if self.has_boundary_cell:
                 self.cell_positions[-1] = np.vstack([self.cell_positions[-1], [eps2, eps2]])
 
-    def construct_graph(self, show=False):
+    def construct_graph(self):
         """Find all flags from the chain complex and construct the graph"""
 
         # Find all the flags recursively
@@ -305,27 +321,12 @@ class FlagCode:
 
         self.nx_graph = nx.from_numpy_array(self.flag_adjacency_matrix)
 
-        edges, weights = zip(*nx.get_edge_attributes(self.nx_graph, 'weight').items())
-
-        if self.cell_positions is None:
-            self.flag_coordinates = nx.spring_layout(self.nx_graph)
-
-        if show:
-            nx.draw(
-                self.nx_graph, self.flag_coordinates,
-                node_color='black', node_size=200,
-                edge_color=np.array(weights)-1, edge_cmap=plt.cm.tab20, width=2,
-                with_labels=True, font_color='white', font_size=7
-            )
-
-            plt.show()
-
     def get_all_rainbow_subgraphs(
         self,
         colors: Union[Set[int], List[int]],
         graph: Graph = None,
         return_format: str = "set"
-    ) -> Union[List[Set[int]], List[np.ndarray]]:
+    ) -> Union[List[Set[int]], List[np.ndarray], List[Graph]]:
         """Get all subgraphs where each node is connected to k edges
         of k different colors.
 
@@ -333,12 +334,18 @@ class FlagCode:
         ----------
         colors : Set[int]
             Set of colors that the subgraph should have at each node
-
+        graph: Graph, optional
+            Graph on which to do the search. By default, it uses the whole flag graph.
+        return_format: str
+            Can be 'set', 'graph' or 'array'.
+            If 'set', returns each graph as the Set of its nodes.
+            If 'array, returns each graph as a binary numpy array of size `n_flags`,
+            with a one for all the node indices present in the subgraph.
         Returns
         -------
-        Union[List[Set[int]], List[np.ndarray]]
-            List of subgraphs, where each subgraph is specified by the set of nodes
-            it contains
+        Union[List[Set[int]], List[np.ndarray], List[Graph]]
+            List of rainbow subgraphs, where the subgraph format is specified
+            by the `return_format` argument
         """
 
         if return_format not in ['set', 'graph', 'array']:
@@ -365,15 +372,15 @@ class FlagCode:
                 rainbow_subgraphs.add(rainbow)
                 return {rainbow}
 
-            self.log("\n===== New exploration =====\n")
-            self.log("Partial subgraph", partial_subgraph)
-            self.log("Explorable nodes", explorable_nodes)
-            self.log("Finished nodes", finished_nodes)
+            # self.log("\n===== New exploration =====\n")
+            # self.log("Partial subgraph", partial_subgraph)
+            # self.log("Explorable nodes", explorable_nodes)
+            # self.log("Finished nodes", finished_nodes)
 
             max_subgraphs = set()
 
             for node in explorable_nodes.copy():
-                self.log("\nExploring node", node)
+                # self.log("\nExploring node", node)
                 explored_colors = {color for _, color in partial_subgraph[node]}
                 remaining_colors = colors - explored_colors
 
@@ -402,16 +409,16 @@ class FlagCode:
                                 subgraph_of_max_subgraph = True
 
                         if not subgraph_of_max_subgraph:
-                            self.log("Trying new adjacent node", adj_node)
+                            # self.log("Trying new adjacent node", adj_node)
                             subgraphs = find_rainbow_subgraphs(
                                 partial_subgraph,
                                 explorable_nodes,
                                 finished_nodes
                             )
-                            self.log("Output max subgraphs: ", subgraphs)
+                            # self.log("Output max subgraphs: ", subgraphs)
                             max_subgraphs.update(subgraphs)
-                        else:
-                            self.log("Already visited")
+                        # else:
+                            # self.log("Already visited")
 
                         partial_subgraph.remove_edge(node, adj_node, color)
 
@@ -421,7 +428,7 @@ class FlagCode:
             if len(max_subgraphs) == 0:
                 max_subgraphs = {partial_subgraph.copy()}
 
-            self.log("\nReturn", max_subgraphs)
+            # self.log("\nReturn", max_subgraphs)
             return max_subgraphs
 
         max_subgraphs = set()
@@ -458,7 +465,7 @@ class FlagCode:
                 subgraph.as_node_set()
                 for subgraph in rainbow_subgraphs
             ]
-        else:
+        elif return_format == 'graph':
             subgraphs_output = rainbow_subgraphs
 
         return subgraphs_output
@@ -468,6 +475,26 @@ class FlagCode:
         colors: Set[int],
         return_format: str = "set"
     ) -> Union[List[Set[int]], List[np.ndarray]]:
+        """Get all the subgraphs where no more edge of a color present in `colors`
+        can be added.
+
+        Parameters
+        ----------
+        colors : Set[int]
+            Set of colors that the subgraph should have at each node
+        graph: Graph, optional
+            Graph on which to do the search. By default, it uses the whole flag graph.
+        return_format: str
+            Can be 'set', 'graph' or 'array'.
+            If 'set', returns each graph as the Set of its nodes.
+            If 'array, returns each graph as a binary numpy array of size `n_flags`,
+            with a one for all the node indices present in the subgraph.
+        Returns
+        -------
+        Union[List[Set[int]], List[np.ndarray], List[Graph]]
+            List of rainbow subgraphs, where the subgraph format is specified
+            by the `return_format` argument
+        """
 
         if return_format not in ['set', 'graph', 'array']:
             raise ValueError(
@@ -506,43 +533,66 @@ class FlagCode:
                 else:
                     maximal_subgraphs.append(subgraph)
 
-        # print("Maximal subgraphs\n", maximal_subgraphs)
         return maximal_subgraphs
 
     def is_pin_code_relation(self) -> bool:
+        """Check whether we have our flag graph defines a valid pin code relation,
+        i.e. where each D-pinned set (i.e. 1-maximal subgraph) has even weight
+
+        Returns
+        -------
+        bool
+            True if the flag graph defines a pin code relation
+        """
         for color in self.all_colors:
             max_subgraphs = self.get_all_maximal_subgraphs({color})
             for subgraph in max_subgraphs:
                 if len(subgraph) % 2 == 1:
-                    print("Bad subgraph", subgraph)
                     return False
 
         return True
 
     def get_stabilizers(
         self,
-        n_pinned: int,
+        n_free: int,
         stabilizer_types: Dict[Tuple, str] = None
     ) -> np.ndarray:
+        """Get the parity-check matrix corresponding to stabilizers defined
+        by `n_free`-subgraphs. The subgraphs are either rainbow or maximal,
+        as specified in `stabilizer_types`.
+
+        Parameters
+        ----------
+        n_free : int
+            Number of colors that define the maximal or rainbow subgraphs.
+        stabilizer_types : Dict[Tuple, str], optional
+            Dictionary that specifies for each tuple of free colors, whether we want
+            a 'rainbow' or a 'maximal' subgraph.
+            By default None ('maximal' for every subgraph)/
+
+        Returns
+        -------
+        np.ndarray
+            Parity-check matrix of size m x n, where m is the number of stabilizers
+            and n the number of qubits.
+        """
 
         maximal_subgraphs = {}
         final_subgraphs = []
 
-        for pinned_colors in combinations(self.all_colors, n_pinned):
-            free_colors = set(self.all_colors) - set(pinned_colors)
-
-            maximal_subgraphs[pinned_colors] = self.get_all_maximal_subgraphs(
+        for free_colors in combinations(self.all_colors, n_free):
+            maximal_subgraphs[free_colors] = self.get_all_maximal_subgraphs(
                 free_colors, return_format='graph'
             )
-            if stabilizer_types[tuple(pinned_colors)] == 'maximal':
+            if stabilizer_types[tuple(free_colors)] == 'maximal':
                 final_subgraphs.extend([
                     max_subgraph.as_array()
-                    for max_subgraph in maximal_subgraphs[pinned_colors]
+                    for max_subgraph in maximal_subgraphs[free_colors]
                 ])
             else:
-                n_max_subgraphs = len(maximal_subgraphs[pinned_colors])
-                for i, max_graph in enumerate(maximal_subgraphs[pinned_colors]):
-                    print(
+                n_max_subgraphs = len(maximal_subgraphs[free_colors])
+                for i, max_graph in enumerate(maximal_subgraphs[free_colors]):
+                    self.log(
                         f"Explore maximal subgraph {i+1} / {n_max_subgraphs}"
                         f" with colors {free_colors}",
                         end='\r'
@@ -553,7 +603,17 @@ class FlagCode:
 
         return np.array(final_subgraphs)
 
-    def get_logicals(self) -> np.ndarray:
+    def get_logicals(self) -> Dict[str, np.ndarray]:
+        """Get the low-weight X and Z logical operators of the code
+
+        Returns
+        -------
+        Dict[str, np.ndarray]
+            Dictionary with two keys 'X' and 'Z', corresponding to X and Z
+            logical operators. For each of them, numpy array of size k x n,
+            where k is the number of logical qubits and n the number of physical
+            qubits.
+        """
         logicals = get_all_logicals(self.Hx, self.Hz, self.k)
 
         self._x_logicals = logicals['X']
@@ -621,24 +681,36 @@ class FlagCode:
 
         return self._d
 
-    def x_stabilizer_weights(self):
+    def x_stabilizer_weights(self) -> Dict[int, int]:
         return get_operator_weights(self.Hx)
 
-    def z_stabilizer_weights(self):
+    def z_stabilizer_weights(self) -> Dict[int, int]:
         return get_operator_weights(self.Hz)
 
-    def x_logical_weights(self):
+    def x_logical_weights(self) -> Dict[int, int]:
         return get_operator_weights(self.x_logicals)
 
-    def z_logical_weights(self):
+    def z_logical_weights(self) -> Dict[int, int]:
         return get_operator_weights(self.z_logicals)
 
-    def is_valid_css(self):
+    def is_valid_css(self) -> bool:
+        """Check whether the X and Z parity-check matrices commute
+
+        Returns
+        -------
+        bool
+            True if it is a valid CSS code with commuting X and Z
+            stabilizers
+        """
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
 
     def is_triorthogonal(self, pauli='X'):
-        H = self.Hx
-        L = self.x_logicals
+        if pauli == 'X':
+            H = self.Hx
+            L = self.x_logicals
+        else:
+            H = self.Hz
+            L = self.z_logicals
 
         # Check stabilizer triorthogonality
         for i1 in range(H.shape[0]):
@@ -646,9 +718,9 @@ class FlagCode:
                 for i3 in range(H.shape[0]):
                     if np.sum(H[i1] * H[i2] * H[i3]) % 2 != 0:
                         print("Not triorthogonal at", i1, i2, i3)
-                        print(self.Hx[i1].nonzero()[0])
-                        print(self.Hx[i2].nonzero()[0])
-                        print(self.Hx[i3].nonzero()[0])
+                        print(H[i1].nonzero()[0])
+                        print(H[i2].nonzero()[0])
+                        print(H[i3].nonzero()[0])
                         return False
 
         print("It is stabilizer triorthogonal")
@@ -673,6 +745,9 @@ class FlagCode:
 
         return True
 
+    def __hash__(self):
+        return hash(self.flag_graph)
+
     def draw(
         self,
         restricted_colors: List[int] = None,
@@ -682,12 +757,45 @@ class FlagCode:
         edge_width: int = 7,
         node_size: int = 45,
         colors: Dict[int, str] = None
-    ):
+    ) -> Network:
+        """Draw the flag graph of the code using PyVis.
+
+        Parameters
+        ----------
+        restricted_colors : List[int], optional
+            Only edges of color present in this list will be displayed.
+            By default None (no restriction).
+        restricted_nodes : List[int], optional
+            Only nodes of index present in this list (and potentially their neighborhood
+            if `restricted_depth` > 0) will be displayed. By default None (no restriction).
+        restricted_depth : int, optional
+            When `restricted_nodes` is given, `restricted_depth` gives the depth of the
+            neighborhood to display around those nodes. By default 0
+        notebook : bool, optional
+            Whether we want to display the graph in a Jupyter notebook environment,
+            by default True.
+        edge_width : int, optional
+            Width of the edges in the visualization, by default 7
+        node_size : int, optional
+            Size of the nodes in the visualization, by default 45
+        colors : Dict[int, str], optional
+            Dictionary that associates a real color (as a string) to each flag graph color.
+            By default None.
+
+        Returns
+        -------
+        nt: Network
+            PyVis Network object. Use nt.show('nx.html') to visualize the graph in a
+            Jupyter notebook.
+        """
         nt = Network(notebook=notebook, cdn_resources='in_line', filter_menu=True)
         nt.from_nx(self.nx_graph)
 
         if colors is None:
             colors = {1: 'blue', 2: 'green', 3: 'red', 4: 'yellow'}
+
+        if restricted_colors is None:
+            restricted_colors = self.all_colors
 
         if restricted_nodes is None:
             restricted_nodes = list(range(self.n_flags))
@@ -723,7 +831,7 @@ class FlagCode:
         return nt
 
 
-def random_code(n_rows=3, n_cols=4):
+def random_code(n_rows: int = 3, n_cols: int = 4):
     matrix = []
 
     while len(matrix) < n_cols:
@@ -734,7 +842,20 @@ def random_code(n_rows=3, n_cols=4):
     return np.transpose(matrix)
 
 
-def make_even(H):
+def make_even(H: np.ndarray) -> np.ndarray:
+    """Take a (classical) parity-check matrix and make its rows and columns even-weight
+    by potentially adding a new row and a new column.
+
+    Parameters
+    ----------
+    H : np.ndarray
+       Parity-check matrix
+
+    Returns
+    -------
+    np.ndarray
+        Even-weight parity-check matrix
+    """
     new_col = np.array([np.sum(H, axis=1) % 2]).T
     if not np.all(new_col == 0):
         H = np.hstack([H, new_col])
@@ -746,7 +867,21 @@ def make_even(H):
     return H
 
 
-def get_operator_weights(operator: np.ndarray):
+def get_operator_weights(operator: np.ndarray) -> Dict[int, int]:
+    """Giving a parity-check or logical matrix, returns the number of
+    operators (dict value) that have a given weight (keys)
+
+    Parameters
+    ----------
+    operator : np.ndarray
+       2D array
+
+    Returns
+    -------
+    Dict[int, int]
+        Weight count, i.e. number of  operators (dict values)
+        that have a given weight (keys)
+    """
     weights, count = np.unique(np.sum(operator, axis=1), return_counts=True)
 
     return {w: c for w, c in zip(weights, count)}

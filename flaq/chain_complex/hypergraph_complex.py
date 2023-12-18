@@ -2,14 +2,17 @@ import functools as ft
 from itertools import combinations
 from typing import List
 
-from ldpc.codes import ring_code
 import numpy as np
 
 from . import BaseComplex
 
 
 class HypergraphComplex(BaseComplex):
-    def __init__(self, parity_check_matrices: List[np.ndarray], sanity_check=True):
+    def __init__(
+        self,
+        parity_check_matrices: List[np.ndarray],
+        sanity_check: bool = True
+    ):
         for H in parity_check_matrices:
             if not isinstance(H, np.ndarray):
                 raise ValueError("The matrices should be given as numpy arrays")
@@ -60,9 +63,3 @@ class HypergraphComplex(BaseComplex):
             boundary_operators.append(boundary_op.T)
 
         return boundary_operators
-
-
-if __name__ == "__main__":
-    H = ring_code(2)
-    complex = HypergraphComplex([H, H])
-    complex.draw_tanner_graph(1)

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 from typing import List
 
+from ldpc.mod2 import rank
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
@@ -11,13 +12,20 @@ from flaq.utils import get_all_logicals
 
 
 class BaseComplex(ABC):
-    def __init__(self, sanity_check=True):
+    def __init__(self, sanity_check: bool = True):
         self._boundary_operators = None
 
         if sanity_check and not self.is_valid_complex():
             raise ValueError("Not a valid complex")
 
-    def is_valid_complex(self):
+    def is_valid_complex(self) -> bool:
+        """Check whether the boundary of a boundary is always zero
+
+        Returns
+        -------
+        bool
+            True if it is a valid chain complex (i.e. the boundary of a boundary is always zero)
+        """
         for i in range(len(self.boundary_operators)-1):
             if not np.all((self.boundary_operators[i] @ self.boundary_operators[i+1]) % 2 == 0):
                 return False
@@ -42,7 +50,7 @@ class BaseComplex(ABC):
 
         return self._boundary_operators
 
-    def get_distance(self, left_index=0, verbose=False):
+    def get_d(self, left_index: int = 0, verbose: bool = False) -> int:
         """Get the distance of the code corresponding to the complex in-between
         left_index and left_index+2
         """
@@ -60,7 +68,28 @@ class BaseComplex(ABC):
 
         return d
 
-    def draw_tanner_graph(self, index_boundary_operator=0, notebook=False):
+    def get_n(self, left_index: int = 0) -> int:
+        """Get the number of physical qubits of the code corresponding to the complex in-between
+        left_index and left_index+2
+        """
+
+        return self.boundary_operators[left_index].shape[1]
+
+    def get_k(self, left_index: int = 0) -> int:
+        """Get the number of logical qubits of the code corresponding to the complex in-between
+        left_index and left_index+2
+        """
+
+        Hx = self.boundary_operators[left_index]
+        Hz = self.boundary_operators[left_index+1].T
+
+        return self.get_n(left_index) - rank(Hx) - rank(Hz)
+
+    def draw_tanner_graph(
+        self,
+        index_boundary_operator: int = 0,
+        notebook: bool = False
+    ) -> Network:
         graph = nx.algorithms.bipartite.from_biadjacency_matrix(
             csr_array(self.boundary_operators[index_boundary_operator])
         )
