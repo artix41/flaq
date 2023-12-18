@@ -32,8 +32,8 @@ class TestFlagCode:
         flag_code = FlagCode(
             complex[1].boundary_operators,
             None,
-            x=1,
-            z=1,
+            x=2,
+            z=2,
             add_boundary_pins=False,
             verbose=False
         )
@@ -44,8 +44,8 @@ class TestFlagCode:
         flag_code = FlagCode(
             complex.boundary_operators,
             None,
-            x=1,
-            z=1,
+            x=2,
+            z=2,
             add_boundary_pins=False,
             verbose=False
         )
@@ -66,7 +66,7 @@ class TestFlagCode:
             complex.boundary_operators,
             None,
             x=2,
-            z=1,
+            z=3,
             add_boundary_pins=False,
             verbose=False
         )
