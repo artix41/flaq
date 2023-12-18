@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 setup(
     name="flaq",
     version="0.0.1",
-    description="Quantum flag codes",
+    description="Quantum flag-based codes",
     license='MIT',
     packages=find_packages(),
     author='Arthur Pesah',
@@ -12,5 +12,5 @@ setup(
     setup_requires=['setuptools_scm'],
     include_package_data=True,
     zip_safe=False,
-    install_requires=['numpy', 'panqec'],
+    install_requires=['numpy', 'ldpc', 'networkx', 'pyvis'],
 )
