@@ -1,2 +1,3 @@
-# Flaq
-Implementation of quantum flag codes
+# Quantum Rainbow codes
+
+Library to study quantum rainbow codes
