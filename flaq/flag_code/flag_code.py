@@ -8,6 +8,7 @@ import networkx as nx
 import numpy as np
 from pyvis.network import Network
 import pickle
+import ujson
 
 from flaq.utils import get_all_logicals
 
@@ -17,21 +18,42 @@ sys.setrecursionlimit(10000)
 class Graph:
     def __init__(self, n_nodes: int):
         self.n_nodes = n_nodes
+
         self.adj_list = [set() for _ in range(n_nodes)]
+        self.edges = set()
+        self.nodes = set()
 
     def add_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].add((node2, color))
         self.adj_list[node2].add((node1, color))
+        self.edges.add((node1, node2))
+        self.edges.add((node2, node1))
+        self.nodes.add(node1)
+        self.nodes.add(node2)
 
     def remove_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].remove((node2, color))
         self.adj_list[node2].remove((node1, color))
+        self.edges.remove((node1, node2))
+
+        if len(self.adj_list[node1]) == 0:
+            self.nodes.remove(node1)
+
+        if len(self.adj_list[node2]) == 0:
+            self.nodes.remove(node2)
 
     def merge_with(self, other_graph: "Graph"):
         for node in range(self.n_nodes):
             self.adj_list[node] = self[node].union(other_graph[node])
 
+        self.edges = self.edges.union(other_graph.edges)
+        self.nodes = self.nodes.union(other_graph.nodes)
+
     def copy(self):
+        # new_graph.adj_list = deepcopy(self.adj_list)
+        # adj_list = list(map(lambda x: x.copy(), self.adj_list))
+        # adj_list = pickle.loads(pickle.dumps(self.adj_list, -1))
+
         new_graph = Graph(self.n_nodes)
         new_graph.adj_list = pickle.loads(pickle.dumps(self.adj_list, -1))
 
@@ -47,13 +69,9 @@ class Graph:
 
         return answer
 
-    def as_node_set(self):
-        return {node for node in range(self.n_nodes) if len(self.adj_list[node]) > 0}
-
     def as_array(self):
         array = np.zeros(self.n_nodes, dtype='uint8')
-        nodes = [node for node in range(self.n_nodes) if len(self.adj_list[node]) > 0]
-        array[nodes] = 1
+        array[list(self.nodes)] = 1
 
         return array
 
@@ -338,7 +356,7 @@ class FlagCode:
         graph: Graph, optional
             Graph on which to do the search. By default, it uses the whole flag graph.
         return_format: str
-            Can be 'set', 'graph' or 'array'.
+            Can be 'set' or 'array'.
             If 'set', returns each graph as the Set of its nodes.
             If 'array, returns each graph as a binary numpy array of size `n_flags`,
             with a one for all the node indices present in the subgraph.
@@ -349,9 +367,9 @@ class FlagCode:
             by the `return_format` argument
         """
 
-        if return_format not in ['set', 'graph', 'array']:
+        if return_format not in ['set', 'array']:
             raise ValueError(
-                f"'return_format' must take value in ['set', 'graph', 'array'],"
+                f"'return_format' must take value in ['set', 'array'],"
                 f"not {return_format}"
             )
 
@@ -362,6 +380,7 @@ class FlagCode:
 
         rainbow_subgraphs = set()
 
+        # @profile
         def find_rainbow_subgraphs(
             partial_subgraph: Graph,
             explorable_nodes: Set[int],
@@ -369,9 +388,10 @@ class FlagCode:
         ):
             if len(explorable_nodes) == 0:
                 # We found a rainbow subgraph
-                rainbow = partial_subgraph.copy()
-                rainbow_subgraphs.add(rainbow)
-                return {rainbow}
+                edges = tuple(partial_subgraph.edges.copy())
+                nodes = tuple(partial_subgraph.nodes.copy())
+                rainbow_subgraphs.add(nodes)
+                return {edges}
 
             # self.log("\n===== New exploration =====\n")
             # self.log("Partial subgraph", partial_subgraph)
@@ -406,7 +426,7 @@ class FlagCode:
 
                         subgraph_of_max_subgraph = False
                         for max_subgraph in max_subgraphs:
-                            if (adj_node, color) in max_subgraph[node]:
+                            if (node, adj_node) in max_subgraph:
                                 subgraph_of_max_subgraph = True
                                 break
 
@@ -428,7 +448,7 @@ class FlagCode:
                         finished_nodes = prev_finished_nodes
 
             if len(max_subgraphs) == 0:
-                max_subgraphs = {partial_subgraph.copy()}
+                max_subgraphs = {partial_subgraph.edges.copy()}
 
             # self.log("\nReturn", max_subgraphs)
             return max_subgraphs
@@ -447,8 +467,9 @@ class FlagCode:
             node_included_in_max_subgraph = False
             if has_all_colors:
                 for max_subgraph in max_subgraphs:
-                    if len(max_subgraph[node]) > 0:
-                        node_included_in_max_subgraph = True
+                    for edge in max_subgraph:
+                        if edge[0] == node or edge[1] == node:
+                            node_included_in_max_subgraph = True
 
             if has_all_colors and not node_included_in_max_subgraph:
                 max_subgraphs.update(
@@ -456,19 +477,13 @@ class FlagCode:
                 )
 
         if return_format == 'array':
-            subgraphs_output = list(map(
-                np.array,
-                list({
-                    tuple(subgraph.as_array()) for subgraph in rainbow_subgraphs
-                })
-            ))
+            subgraphs_output = []
+            for subgraph_nodes in rainbow_subgraphs:
+                subgraph_array = np.zeros(self.n_flags, dtype='uint8')
+                subgraph_array[list(subgraph_nodes)] = 1
+                subgraphs_output.append(subgraph_array)
         elif return_format == 'set':
-            subgraphs_output = [
-                subgraph.as_node_set()
-                for subgraph in rainbow_subgraphs
-            ]
-        elif return_format == 'graph':
-            subgraphs_output = rainbow_subgraphs
+            subgraphs_output = list(map(set, rainbow_subgraphs))
 
         return subgraphs_output
 
@@ -528,10 +543,10 @@ class FlagCode:
 
                 if return_format == 'array':
                     subgraph_array = np.zeros(self.n_flags, dtype='uint8')
-                    subgraph_array[list(subgraph.as_node_set())] = 1
+                    subgraph_array[list(subgraph.nodes)] = 1
                     maximal_subgraphs.append(subgraph_array)
                 elif return_format == 'set':
-                    maximal_subgraphs.append(subgraph.as_node_set())
+                    maximal_subgraphs.append(subgraph.nodes)
                 else:
                     maximal_subgraphs.append(subgraph)
 
@@ -877,7 +892,7 @@ def get_operator_weights(operator: np.ndarray) -> Dict[int, int]:
 if __name__ == "__main__":
     from flaq.chain_complex import DoubleSquareComplex
 
-    complex = DoubleSquareComplex(4, 4, periodic=True, sanity_check=True)
+    complex = DoubleSquareComplex(10, 10, periodic=True, sanity_check=True)
 
     stabilizer_types = {
         'X': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'},
