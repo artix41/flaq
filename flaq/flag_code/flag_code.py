@@ -1,4 +1,4 @@
-from itertools import combinations
+from itertools import combinations, product
 import sys
 from typing import List, Set, Tuple, Union, Dict, Optional
 
@@ -7,6 +7,7 @@ from ldpc.mod2 import rank
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
+import pickle
 
 from flaq.utils import get_all_logicals
 
@@ -32,7 +33,7 @@ class Graph:
 
     def copy(self):
         new_graph = Graph(self.n_nodes)
-        new_graph.adj_list = deepcopy(self.adj_list)
+        new_graph.adj_list = pickle.loads(pickle.dumps(self.adj_list, -1))
 
         return new_graph
 
@@ -405,8 +406,9 @@ class FlagCode:
 
                         subgraph_of_max_subgraph = False
                         for max_subgraph in max_subgraphs:
-                            if partial_subgraph.is_subgraph(max_subgraph):
+                            if (adj_node, color) in max_subgraph[node]:
                                 subgraph_of_max_subgraph = True
+                                break
 
                         if not subgraph_of_max_subgraph:
                             # self.log("Trying new adjacent node", adj_node)
@@ -704,7 +706,7 @@ class FlagCode:
         """
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
 
-    def is_triorthogonal(self, pauli='X'):
+    def is_multiorthogonal(self, k: int = 3, pauli: str = 'X'):
         if pauli == 'X':
             H = self.Hx
             L = self.x_logicals
@@ -712,36 +714,21 @@ class FlagCode:
             H = self.Hz
             L = self.z_logicals
 
-        # Check stabilizer triorthogonality
-        for i1 in range(H.shape[0]):
-            for i2 in range(H.shape[0]):
-                for i3 in range(H.shape[0]):
-                    if np.sum(H[i1] * H[i2] * H[i3]) % 2 != 0:
-                        print("Not triorthogonal at", i1, i2, i3)
-                        print(H[i1].nonzero()[0])
-                        print(H[i2].nonzero()[0])
-                        print(H[i3].nonzero()[0])
-                        return False
+        for n_L in range(k):
+            indices = product(
+                *[range(L.shape[0]) for _ in range(n_L)],
+                *[range(H.shape[0]) for _ in range(k-n_L)]
+            )
 
-        print("It is stabilizer triorthogonal")
+            for index in indices:
+                logical_rows = [L[i] for i in index[:n_L]]
+                stab_rows = [H[i] for i in index[n_L:]]
 
-        # Check one-logical triorthogonality
-        for i1 in range(H.shape[0]):
-            for i2 in range(H.shape[0]):
-                for i3 in range(L.shape[0]):
-                    if np.sum(H[i1] * H[i2] * L[i3]) % 2 != 0:
-                        return False
+                prod = np.prod([*logical_rows, *stab_rows], axis=0)
 
-        print("It is one-logical triorthogonal")
-
-        # Check one-logical triorthogonality
-        for i1 in range(H.shape[0]):
-            for i2 in range(L.shape[0]):
-                for i3 in range(L.shape[0]):
-                    if np.sum(H[i1] * L[i2] * L[i3]) % 2 != 0:
-                        return False
-
-        print("It is two-logical triorthogonal")
+                if np.sum(prod) % 2 != 0:
+                    print(f"Not {k}-orthogonal when including {n_L} logicals")
+                    return False
 
         return True
 
@@ -885,3 +872,25 @@ def get_operator_weights(operator: np.ndarray) -> Dict[int, int]:
     weights, count = np.unique(np.sum(operator, axis=1), return_counts=True)
 
     return {w: c for w, c in zip(weights, count)}
+
+
+if __name__ == "__main__":
+    from flaq.chain_complex import DoubleSquareComplex
+
+    complex = DoubleSquareComplex(4, 4, periodic=True, sanity_check=True)
+
+    stabilizer_types = {
+        'X': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'},
+        'Z': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'}
+    }
+
+    flag_code = FlagCode(
+        complex.boundary_operators,
+        x=2,
+        z=2,
+        add_boundary_pins=False,
+        stabilizer_types=stabilizer_types,
+        verbose=True
+    )
+
+    flag_code.get_all_rainbow_subgraphs([1, 2])

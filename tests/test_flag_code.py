@@ -72,7 +72,7 @@ class TestFlagCode:
         )
 
         # Test that maximal and rainbow subgraphs are equal for manifolds
-        for colors in combinations([1, 2, 3], 2):
+        for colors in [*combinations([1, 2, 3, 4], 2), *combinations([1, 2, 3, 4], 3)]:
             max_subgraphs = flag_code.get_all_maximal_subgraphs(colors)
             rainbow_subgraphs = flag_code.get_all_rainbow_subgraphs(colors)
 
