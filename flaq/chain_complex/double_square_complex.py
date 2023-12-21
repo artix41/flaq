@@ -52,13 +52,15 @@ class DoubleSquareComplex(BaseComplex):
         edge_coordinates = []
 
         # Vertical edges
-        for x in range(0, 2*self.Lx+1, 2):
+        max_x = 2*self.Lx if self.periodic else 2*self.Lx+1
+        for x in range(0, max_x, 2):
             for y in range(1, 2*self.Ly, 2):
                 edge_coordinates.append((x, y))
 
         # Horizontal edges
+        max_y = 2*self.Lx if self.periodic else 2*self.Lx+1
         for x in range(1, 2*self.Lx, 2):
-            for y in range(0, 2*self.Ly+1, 2):
+            for y in range(0, max_y, 2):
                 edge_coordinates.append((x, y))
 
         face_coordinates = []
