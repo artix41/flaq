@@ -61,10 +61,12 @@ class BaseComplex(ABC):
             verbose=verbose
         )
 
-        d = min(
-            np.min(np.sum(logicals['X'], axis=1)),
-            np.min(np.sum(logicals['Z'], axis=1))
-        )
+        d = 0
+        if len(logicals['X']) > 0:
+            d = min(
+                np.min(np.sum(logicals['X'], axis=1)),
+                np.min(np.sum(logicals['Z'], axis=1))
+            )
 
         return d
 
