@@ -35,6 +35,7 @@ class Graph:
         self.adj_list[node1].remove((node2, color))
         self.adj_list[node2].remove((node1, color))
         self.edges.remove((node1, node2))
+        self.edges.remove((node2, node1))
 
         if len(self.adj_list[node1]) == 0:
             self.nodes.remove(node1)
