@@ -678,14 +678,18 @@ class FlagCode:
     @property
     def d_x(self):
         if self._d_x is None:
-            self._d_x = np.min(np.sum(self.x_logicals, axis=1))
+            self._d_x = 0
+            if len(self.x_logicals) > 0:
+                self._d_x = np.min(np.sum(self.x_logicals, axis=1))
 
         return self._d_x
 
     @property
     def d_z(self):
         if self._d_z is None:
-            self._d_z = np.min(np.sum(self.z_logicals, axis=1))
+            self._d_z = 0
+            if len(self.z_logicals) > 0:
+                self._d_z = np.min(np.sum(self.z_logicals, axis=1))
 
         return self._d_z
 
