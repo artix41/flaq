@@ -9,16 +9,11 @@ def log(*args, verbose=False, **kwargs):
 
 
 def get_all_logicals(Hx, Hz, k=None, verbose=False):
-    min_x_logicals = []
-    min_z_logicals = []
-
     arbitrary_x_logicals = get_arbitrary_logicals(Hx, Hz, 'X', k, verbose=verbose)
+    arbitrary_z_logicals = get_arbitrary_logicals(Hx, Hz, 'Z', k, verbose=verbose)
 
-    for anticommuting_x_logical in arbitrary_x_logicals:
-        min_z_logicals.append(get_minimum_logical(Hx, anticommuting_x_logical))
-
-    for anticommuting_z_logical in min_z_logicals:
-        min_x_logicals.append(get_minimum_logical(Hz, anticommuting_z_logical))
+    min_z_logicals = get_minimum_logicals(Hx, arbitrary_x_logicals)
+    min_x_logicals = get_minimum_logicals(Hz, arbitrary_z_logicals)
 
     min_x_logicals = np.array(min_x_logicals, dtype='uint8')
     min_z_logicals = np.array(min_z_logicals, dtype='uint8')
@@ -26,8 +21,8 @@ def get_all_logicals(Hx, Hz, k=None, verbose=False):
     return {'X': min_x_logicals, 'Z': min_z_logicals}
 
 
-def get_minimum_logical(H, anticommuting_logical):
-    H_with_logical = np.vstack([H, anticommuting_logical])
+def get_minimum_logicals(H, anti_logical_basis):
+    H_with_logical = np.vstack([H, anti_logical_basis])
 
     decoder = bposd_decoder(
         H_with_logical,
@@ -38,10 +33,18 @@ def get_minimum_logical(H, anticommuting_logical):
         osd_order=0
     )
 
-    syndrome = np.array([0] * H.shape[0] + [1])
-    predicted_logical_binary = decoder.decode(syndrome)
+    logicals = []
+    for i in range(len(anti_logical_basis)):
+        logical_syndrome = [0 for _ in range(len(anti_logical_basis))]
+        logical_syndrome[i] = 1
 
-    return predicted_logical_binary
+        syndrome = np.array([0] * H.shape[0] + logical_syndrome)
+
+        predicted_logical_binary = decoder.decode(syndrome)
+
+        logicals.append(predicted_logical_binary)
+
+    return logicals
 
 
 def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None, verbose=False):
