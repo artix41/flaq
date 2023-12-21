@@ -4,7 +4,7 @@ from itertools import combinations
 from ldpc.codes import ring_code
 
 from flaq.flag_code import FlagCode
-from flaq.chain_complex import HypergraphComplex
+from flaq.chain_complex import HypergraphComplex, DoubleSquareComplex
 
 
 square_complexes = [
@@ -37,7 +37,7 @@ class TestFlagCode:
             add_boundary_pins=False,
             verbose=False
         )
-        assert 8*L**2 == len(flag_code.flags)
+        assert 8*L**2 == flag_code.n
 
     @pytest.mark.parametrize("complex", manifold_2d_complexes)
     def test_manifold_2d_complex(self, complex):
@@ -49,6 +49,11 @@ class TestFlagCode:
             add_boundary_pins=False,
             verbose=False
         )
+
+        assert flag_code.is_pin_code_relation()
+        assert flag_code.is_valid_css()
+        assert flag_code.is_manifold()
+        assert flag_code.is_multiorthogonal(2)
 
         # Test that maximal and rainbow subgraphs are equal for manifolds
         for colors in combinations([1, 2, 3], 2):
@@ -65,11 +70,16 @@ class TestFlagCode:
         flag_code = FlagCode(
             complex.boundary_operators,
             None,
-            x=2,
-            z=3,
+            x=3,
+            z=2,
             add_boundary_pins=False,
             verbose=False
         )
+
+        assert flag_code.is_pin_code_relation()
+        assert flag_code.is_manifold()
+        assert flag_code.is_valid_css()
+        assert flag_code.is_multiorthogonal(3)
 
         # Test that maximal and rainbow subgraphs are equal for manifolds
         for colors in [*combinations([1, 2, 3, 4], 2), *combinations([1, 2, 3, 4], 3)]:
@@ -80,3 +90,38 @@ class TestFlagCode:
 
             for subgraph in max_subgraphs:
                 assert subgraph in rainbow_subgraphs
+
+    def test_3d_color_code(self):
+        complex = HypergraphComplex([ring_code(2), ring_code(2), ring_code(2)])
+        color_code = FlagCode(
+            complex.boundary_operators,
+            x=2,
+            z=3,
+            add_boundary_pins=False,
+            verbose=False
+        )
+
+        assert color_code.n == 384
+        assert color_code.k == 9
+        assert color_code.d == 6
+
+    def test_double_square_rainbow_code(self):
+        stabilizer_types = {
+            'X': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'},
+            'Z': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'}
+        }
+
+        for sizes in [(2, 2), (3, 3), (4, 4)]:
+            complex = DoubleSquareComplex(*sizes, periodic=True, sanity_check=True)
+
+            flag_code = FlagCode(
+                complex.boundary_operators,
+                x=2,
+                z=2,
+                stabilizer_types=stabilizer_types)
+
+            assert flag_code.is_pin_code_relation()
+            assert flag_code.is_valid_css()
+            assert not flag_code.is_manifold()
+            assert flag_code.k == 4
+            assert flag_code.d == 4*sizes[0]
