@@ -2,13 +2,11 @@ from itertools import combinations, product
 import sys
 from typing import List, Set, Tuple, Union, Dict, Optional
 
-from copy import deepcopy
 from ldpc.mod2 import rank
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
 import pickle
-import ujson
 
 from flaq.utils import get_all_logicals
 
@@ -189,11 +187,11 @@ class FlagCode:
             self.stabilizer_types = {
                 'X': {
                     tuple(free_colors): 'maximal'
-                    for free_colors in combinations(self.all_colors, self.n_levels - self.x)
+                    for free_colors in combinations(self.all_colors, self.x)
                 },
                 'Z': {
                     tuple(free_colors): 'maximal'
-                    for free_colors in combinations(self.all_colors, self.n_levels - self.z)
+                    for free_colors in combinations(self.all_colors, self.z)
                 }
             }
 
@@ -745,6 +743,14 @@ class FlagCode:
                 if np.sum(prod) % 2 != 0:
                     print(f"Not {k}-orthogonal when including {n_L} logicals")
                     return False
+
+        return True
+
+    def is_manifold(self):
+        for node in self.flag_graph.nodes:
+            colors_at_node = list(map(lambda x: x[1], self.flag_graph[node]))
+            if len(colors_at_node) != len(set(colors_at_node)):
+                return False
 
         return True
 
