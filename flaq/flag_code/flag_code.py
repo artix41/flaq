@@ -446,7 +446,7 @@ class FlagCode:
                         finished_nodes = prev_finished_nodes
 
             if len(max_subgraphs) == 0:
-                max_subgraphs = {partial_subgraph.edges.copy()}
+                max_subgraphs = {tuple(sorted(partial_subgraph.edges))}
 
             # self.log("\nReturn", max_subgraphs)
             return max_subgraphs
@@ -811,13 +811,14 @@ class FlagCode:
         if colors is None:
             colors = {1: 'blue', 2: 'green', 3: 'red', 4: 'yellow'}
 
+        highlight_restricted_nodes = (restricted_nodes is not None)
         if restricted_colors is None:
             restricted_colors = self.all_colors
 
         if restricted_nodes is None:
             restricted_nodes = list(range(self.n_flags))
 
-        restricted_nodes = self.flag_graph.get_neighborhood_nodes(
+        displayed_nodes = self.flag_graph.get_neighborhood_nodes(
             restricted_nodes, restricted_depth
         )
 
@@ -826,8 +827,8 @@ class FlagCode:
             edge['color'] = colors[color_id]
             edge['width'] = edge_width
             if (color_id not in restricted_colors
-                    or edge['from'] not in restricted_nodes
-                    or edge['to'] not in restricted_nodes):
+                    or edge['from'] not in displayed_nodes
+                    or edge['to'] not in displayed_nodes):
                 edge['hidden'] = True
                 edge['physics'] = False
 
@@ -837,9 +838,12 @@ class FlagCode:
             node['shape'] = 'circle'
             node['font'] = {'size': node_size}
 
-            if node_id not in restricted_nodes:
+            if node_id not in displayed_nodes:
                 node['hidden'] = True
                 node['physics'] = False
+
+            if highlight_restricted_nodes and node_id in restricted_nodes:
+                node['font']['color'] = 'red'
 
         nt.show_buttons(filter_=['physics'])
 
