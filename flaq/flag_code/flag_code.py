@@ -766,6 +766,24 @@ class FlagCode:
 
         return True
 
+    def get_syndrome(self, error: Union[List[int], Set[int]], pauli: str):
+        error = list(error)
+        error_vector = np.zeros(self.n, dtype='uint8')
+        error_vector[error] = 1
+        H = {'X': self.Hz, 'Z': self.Hx}[pauli]
+
+        syndrome = (H.dot(error_vector) % 2).nonzero()[0]
+
+        return syndrome
+
+    def is_stabilizer(self, stabilizer: Union[List[int], Set[int]], pauli: str):
+        stabilizer = list(stabilizer)
+        stab_array = np.zeros(self.n, dtype='uint8')
+        stab_array[stabilizer] = 1
+        H = {'X': self.Hx, 'Z': self.Hz}[pauli]
+
+        return rank(np.vstack([H, stab_array])) == rank(H)
+
     def __hash__(self):
         return hash(self.flag_graph)
 
