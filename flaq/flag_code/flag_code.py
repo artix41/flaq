@@ -379,7 +379,6 @@ class FlagCode:
 
         rainbow_subgraphs = set()
 
-        # @profile
         def find_rainbow_subgraphs(
             partial_subgraph: Graph,
             explorable_nodes: Set[int],
@@ -387,8 +386,8 @@ class FlagCode:
         ):
             if len(explorable_nodes) == 0:
                 # We found a rainbow subgraph
-                edges = tuple(partial_subgraph.edges.copy())
-                nodes = tuple(partial_subgraph.nodes.copy())
+                edges = tuple(sorted(partial_subgraph.edges))
+                nodes = tuple(sorted(partial_subgraph.nodes))
                 rainbow_subgraphs.add(nodes)
                 return {edges}
 
@@ -729,12 +728,19 @@ class FlagCode:
             L = self.z_logicals
 
         for n_L in range(k):
-            indices = product(
+            indices = list(product(
                 *[range(L.shape[0]) for _ in range(n_L)],
                 *[range(H.shape[0]) for _ in range(k-n_L)]
-            )
+            ))
 
-            for index in indices:
+            for i, index in enumerate(indices):
+                if i % 100 == 0:  # used to reduce the print rate (useful in notebooks)
+                    self.log(
+                        f"{k}-orthogonality with {n_L} logicals: "
+                        f"{round((i+1) / len(indices) * 100)}%",
+                        end='\r'
+                    )
+
                 logical_rows = [L[i] for i in index[:n_L]]
                 stab_rows = [H[i] for i in index[n_L:]]
 
@@ -743,6 +749,8 @@ class FlagCode:
                 if np.sum(prod) % 2 != 0:
                     print(f"Not {k}-orthogonal when including {n_L} logicals")
                     return False
+
+            self.log(f"Multiorthogonal with {n_L} logicals")
 
         return True
 
