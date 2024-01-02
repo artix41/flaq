@@ -2,7 +2,7 @@ from itertools import combinations, product
 import sys
 from typing import List, Set, Tuple, Union, Dict, Optional
 
-from ldpc.mod2 import rank
+from ldpc.mod2 import rank, nullspace
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
@@ -20,6 +20,7 @@ class Graph:
         self.adj_list = [set() for _ in range(n_nodes)]
         self.edges = set()
         self.nodes = set()
+        self.color_count = dict()
 
     def add_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].add((node2, color))
@@ -28,6 +29,11 @@ class Graph:
         self.edges.add((node2, node1))
         self.nodes.add(node1)
         self.nodes.add(node2)
+
+        if color in self.color_count:
+            self.color_count[color] += 1
+        else:
+            self.color_count[color] = 1
 
     def remove_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].remove((node2, color))
@@ -40,6 +46,10 @@ class Graph:
 
         if len(self.adj_list[node2]) == 0:
             self.nodes.remove(node2)
+
+        self.color_count[color] -= 1
+        if self.color_count[color] == 0:
+            self.color_count.pop(color)
 
     def merge_with(self, other_graph: "Graph"):
         for node in range(self.n_nodes):
@@ -125,6 +135,7 @@ class FlagCode:
         z: int = 2,
         add_boundary_pins: bool = True,
         stabilizer_types: Optional[Dict[str, Dict[Tuple, str]]] = None,
+        reduce_logicals_iter: int = 0,
         verbose: bool = False
     ):
         """Flag code constructor
@@ -163,6 +174,7 @@ class FlagCode:
         self.x = x
         self.z = z
         self.stabilizer_types = stabilizer_types
+        self.reduce_logicals_iter = reduce_logicals_iter
         self.verbose = verbose
 
         if x < 2 or z < 2:
@@ -488,6 +500,7 @@ class FlagCode:
     def get_all_maximal_subgraphs(
         self,
         colors: Set[int],
+        graph: Graph = None,
         return_format: str = "set"
     ) -> Union[List[Set[int]], List[np.ndarray]]:
         """Get all the subgraphs where no more edge of a color present in `colors`
@@ -507,7 +520,7 @@ class FlagCode:
         Returns
         -------
         Union[List[Set[int]], List[np.ndarray], List[Graph]]
-            List of rainbow subgraphs, where the subgraph format is specified
+            List of maximal subgraphs, where the subgraph format is specified
             by the `return_format` argument
         """
 
@@ -516,6 +529,9 @@ class FlagCode:
                 f"'return_format' must take value in ['set', 'graph', 'array'],"
                 f"not {return_format}"
             )
+
+        if graph is None:
+            graph = self.flag_graph
 
         visited_nodes = set()
         maximal_subgraphs = []
@@ -527,7 +543,7 @@ class FlagCode:
             visited_nodes.add(node)
             subgraph = Graph(self.n_flags)
 
-            for adj_node, color in self.flag_graph[node]:
+            for adj_node, color in graph[node]:
                 if color in colors:
                     adj_max_subgraph = get_max_subgraph(adj_node)
                     subgraph.merge_with(adj_max_subgraph)
@@ -535,10 +551,9 @@ class FlagCode:
 
             return subgraph
 
-        for node in range(self.n_flags):
+        for node in graph.nodes:
             if node not in visited_nodes:
                 subgraph = get_max_subgraph(node)
-
                 if return_format == 'array':
                     subgraph_array = np.zeros(self.n_flags, dtype='uint8')
                     subgraph_array[list(subgraph.nodes)] = 1
@@ -618,7 +633,7 @@ class FlagCode:
 
         return np.array(final_subgraphs)
 
-    def get_logicals(self) -> Dict[str, np.ndarray]:
+    def get_logicals(self, verbose: bool = False) -> Dict[str, np.ndarray]:
         """Get the low-weight X and Z logical operators of the code
 
         Returns
@@ -629,10 +644,15 @@ class FlagCode:
             where k is the number of logical qubits and n the number of physical
             qubits.
         """
-        logicals = get_all_logicals(self.Hx, self.Hz, self.k)
+        logicals = get_all_logicals(
+            self.Hx, self.Hz, self.k, reduce_iter=self.reduce_logicals_iter,
+            verbose=verbose
+        )
 
         self._x_logicals = logicals['X']
         self._z_logicals = logicals['Z']
+
+        self._d, self._d_x, self._d_z = None, None, None
 
         return logicals
 
@@ -762,6 +782,72 @@ class FlagCode:
         for node in self.flag_graph.nodes:
             colors_at_node = list(map(lambda x: x[1], self.flag_graph[node]))
             if len(colors_at_node) != len(set(colors_at_node)):
+                return False
+
+        return True
+
+    def is_unfoldable(self) -> bool:
+        free_colors = set(range(1, self.dimension+1))
+        free_colors = {1, 3}
+
+        maximal_subgraphs: Set[Graph] = self.get_all_maximal_subgraphs(
+            free_colors, return_format='graph'
+        )
+
+        for max_subgraph in maximal_subgraphs:
+            # print("Max subgraph", max_subgraph.nodes)
+            # Get all maximal 1-graphs (aka unit graphs)
+            unit_graphs: List[Graph] = []
+            for color in free_colors:
+                unit_graphs.extend(
+                    list(self.get_all_maximal_subgraphs(
+                        {color}, max_subgraph, return_format='graph'
+                    ))
+                )
+
+            # print("Unit graphs", [g.nodes for g in unit_graphs])
+            n = len(unit_graphs)
+            # print("Number of unit graphs", n)
+
+            n_ancillas = n - len(max_subgraph.nodes)
+            # print("n_ancillas", n_ancillas)
+
+            # Get all X operators of the overlap toric code group,
+            # by considering the adjacency matrix of connected unit graphs
+            adj_matrix = np.zeros((n, n), dtype='uint8')
+            for i in range(n):
+                for j in range(n):
+                    if i != j and len(unit_graphs[i].nodes & unit_graphs[j].nodes) != 0:
+                        adj_matrix[i, j] = 1
+                        adj_matrix[j, i] = 1
+
+            # print("Adj matrix", adj_matrix)
+
+            n_x_ops_tc = rank(adj_matrix)
+            # print("Number of X ops TC", n_x_ops_tc)
+
+            # Get all X operators of the overlap color code group
+            unit_graph_arrays = np.array(
+                [unit_graph.as_array() for unit_graph in unit_graphs]
+            )
+
+            n_x_ops_cc = n - 2*(n - rank(unit_graph_arrays))
+            # print("Number of X ops CC", n_x_ops_cc)
+
+            if n_x_ops_cc + n_ancillas != n_x_ops_tc:
+                return False
+
+            # Get the center of the overlap groups
+            n_gen_center_tc = rank(nullspace(adj_matrix))
+
+            # print("Nullspace TC", nullspace(adj_matrix))
+
+            n_gen_center_cc = 2*rank(nullspace(unit_graph_arrays[:, list(max_subgraph.nodes)]))
+
+            # print("n_gen_center_tc", n_gen_center_tc)
+            # print("n_gen_center_cc", n_gen_center_cc)
+
+            if n_gen_center_cc + n_ancillas != n_gen_center_tc:
                 return False
 
         return True
