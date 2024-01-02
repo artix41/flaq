@@ -53,8 +53,10 @@ class DoubleSquareComplex(BaseComplex):
 
         # Vertical edges
         max_x = 2*self.Lx if self.periodic else 2*self.Lx+1
+        min_y = 1 if self.periodic else -1
+        max_y = 2*self.Ly if self.periodic else 2*self.Ly+2
         for x in range(0, max_x, 2):
-            for y in range(1, 2*self.Ly, 2):
+            for y in range(min_y, max_y, 2):
                 edge_coordinates.append((x, y))
 
         # Horizontal edges
@@ -64,8 +66,10 @@ class DoubleSquareComplex(BaseComplex):
                 edge_coordinates.append((x, y))
 
         face_coordinates = []
+        min_y = 1 if self.periodic else -1
+        max_y = 2*self.Ly if self.periodic else 2*self.Ly+2
         for x in range(1, 2*self.Lx, 2):
-            for y in range(1, 2*self.Ly, 2):
+            for y in range(min_y, max_y, 2):
                 face_coordinates.append((x, y))
 
         vertex_index = {coord: i for i, coord in enumerate(vertex_coordinates)}
