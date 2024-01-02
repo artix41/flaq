@@ -14,6 +14,9 @@ from flaq.utils import get_all_logicals
 class BaseComplex(ABC):
     def __init__(self, sanity_check: bool = True):
         self._boundary_operators = None
+        self._n = None
+        self._k = None
+        self._d = None
 
         if sanity_check and not self.is_valid_complex():
             raise ValueError("Not a valid complex")
@@ -50,14 +53,59 @@ class BaseComplex(ABC):
 
         return self._boundary_operators
 
-    def get_d(self, left_index: int = 0, verbose: bool = False) -> int:
+    @property
+    def n(self) -> int:
+        if self._n is None:
+            self._n = self.get_n()
+
+        return self._n
+
+    @property
+    def k(self) -> int:
+        if self._k is None:
+            self._k = self.get_k()
+
+        return self._k
+
+    @property
+    def d(self) -> int:
+        if self._d is None:
+            self._d = self.get_d()
+
+        return self._d
+
+    def get_logicals(
+        self,
+        left_index: int = 0,
+        reduce_iter: int = 0,
+        osd_order=6,
+        verbose: bool = False
+    ) -> int:
+        logicals = get_all_logicals(
+            self.boundary_operators[left_index],
+            self.boundary_operators[left_index+1].T,
+            reduce_iter=reduce_iter,
+            osd_order=osd_order,
+            verbose=verbose
+        )
+
+        return logicals
+
+    def get_d(
+        self,
+        left_index: int = 0,
+        reduce_iter: int = 0,
+        osd_order=6,
+        verbose: bool = False
+    ) -> int:
         """Get the distance of the code corresponding to the complex in-between
         left_index and left_index+2
         """
 
-        logicals = get_all_logicals(
-            self.boundary_operators[left_index],
-            self.boundary_operators[left_index+1].T,
+        logicals = self.get_logicals(
+            left_index=left_index,
+            reduce_iter=reduce_iter,
+            osd_order=osd_order,
             verbose=verbose
         )
 
