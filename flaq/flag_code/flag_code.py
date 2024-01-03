@@ -1,4 +1,6 @@
+import copyreg
 from itertools import combinations, product
+from functools import partial
 import sys
 from typing import List, Set, Tuple, Union, Dict, Optional
 
@@ -6,124 +8,12 @@ from ldpc.mod2 import rank, nullspace
 import networkx as nx
 import numpy as np
 from pyvis.network import Network
-import pickle
+from p_tqdm import p_map
 
 from flaq.utils import get_all_logicals
+from flaq.algorithms import Graph, get_rainbow_subgraphs
 
 sys.setrecursionlimit(10000)
-
-
-class Graph:
-    def __init__(self, n_nodes: int):
-        self.n_nodes = n_nodes
-
-        self.adj_list = [set() for _ in range(n_nodes)]
-        self.edges = set()
-        self.nodes = set()
-        self.color_count = dict()
-
-    def add_edge(self, node1: int, node2: int, color: int):
-        self.adj_list[node1].add((node2, color))
-        self.adj_list[node2].add((node1, color))
-        self.edges.add((node1, node2))
-        self.edges.add((node2, node1))
-        self.nodes.add(node1)
-        self.nodes.add(node2)
-
-        if color in self.color_count:
-            self.color_count[color] += 1
-        else:
-            self.color_count[color] = 1
-
-    def remove_edge(self, node1: int, node2: int, color: int):
-        self.adj_list[node1].remove((node2, color))
-        self.adj_list[node2].remove((node1, color))
-        self.edges.remove((node1, node2))
-        self.edges.remove((node2, node1))
-
-        if len(self.adj_list[node1]) == 0:
-            self.nodes.remove(node1)
-
-        if len(self.adj_list[node2]) == 0:
-            self.nodes.remove(node2)
-
-        self.color_count[color] -= 1
-        if self.color_count[color] == 0:
-            self.color_count.pop(color)
-
-    def merge_with(self, other_graph: "Graph"):
-        for node in range(self.n_nodes):
-            self.adj_list[node] = self[node].union(other_graph[node])
-
-        self.edges = self.edges.union(other_graph.edges)
-        self.nodes = self.nodes.union(other_graph.nodes)
-
-    def copy(self):
-        # new_graph.adj_list = deepcopy(self.adj_list)
-        # adj_list = list(map(lambda x: x.copy(), self.adj_list))
-        # adj_list = pickle.loads(pickle.dumps(self.adj_list, -1))
-
-        new_graph = Graph(self.n_nodes)
-        new_graph.adj_list = pickle.loads(pickle.dumps(self.adj_list, -1))
-
-        return new_graph
-
-    def connected_colors(self, node):
-        return [adj_node[1] for adj_node in self.adj_list[node]]
-
-    def is_subgraph(self, bigger_graph):
-        answer = True
-        for node in range(self.n_nodes):
-            answer = answer and self.adj_list[node].issubset(bigger_graph[node])
-
-        return answer
-
-    def as_array(self):
-        array = np.zeros(self.n_nodes, dtype='uint8')
-        array[list(self.nodes)] = 1
-
-        return array
-
-    def get_neighborhood_nodes(self, nodes: Union[Set, List], depth: int):
-        explorable_nodes = set(nodes.copy())
-        visited_nodes = set()
-
-        current_depth = 0
-        while len(explorable_nodes) > 0 and current_depth <= depth:
-            for node in explorable_nodes.copy():
-                explorable_nodes.remove(node)
-                visited_nodes.add(node)
-
-                for adj_node, _ in self[node]:
-                    if adj_node not in visited_nodes:
-                        explorable_nodes.add(adj_node)
-
-            current_depth += 1
-
-        return visited_nodes
-
-    def __getitem__(self, index: int):
-        return self.adj_list[index]
-
-    def __repr__(self):
-        adj_dict = {}
-
-        for node in range(self.n_nodes):
-            if len(self.adj_list[node]) != 0:
-                adj_dict[node] = set(map(lambda x: x[0], self.adj_list[node]))
-
-        return f"Graph({adj_dict})"
-
-    def __hash__(self):
-        hashed_value = hash(tuple(map(
-            lambda nodes: tuple(sorted(nodes, key=lambda adj_node: adj_node[0])),
-            self.adj_list
-        )))
-
-        return hashed_value
-
-    def __eq__(self, g):
-        return (g.adj_list == self.adj_list)
 
 
 class FlagCode:
@@ -136,6 +26,7 @@ class FlagCode:
         add_boundary_pins: bool = True,
         stabilizer_types: Optional[Dict[str, Dict[Tuple, str]]] = None,
         reduce_logicals_iter: int = 0,
+        osd_order=6,
         verbose: bool = False
     ):
         """Flag code constructor
@@ -155,6 +46,12 @@ class FlagCode:
             If True, add some boundary pins to make the 0-cells and D-cells even-weight
             (warning: it tends to increase the number of qubits by a large amount).
             By default False.
+        reduce_logicals_iter: int, optional
+            Number of iterations to reduce to size of the logicals
+            By default: 0.
+        osd_order: int, optional
+            Order of the OSD algorithms to use when finding the logicals
+            Default: 6
         verbose: bool, optional
             If True, print some information when running the code
         """
@@ -167,6 +64,8 @@ class FlagCode:
 
         self.boundary_operators = boundary_operators
         self.cell_positions = cell_positions
+        self.add_boundary_pins = add_boundary_pins
+        self.osd_order = osd_order
         self.dimension = len(self.boundary_operators)
         self.n_levels = self.dimension + 1
         self.n_colors = self.n_levels
@@ -214,7 +113,7 @@ class FlagCode:
         self.has_boundary_cell = False
 
         if add_boundary_pins:
-            self.add_boundary_pins()
+            self.construct_boundary_pins()
 
         self.n_cells = [boundary_operators[0].shape[0]]
         for i in range(self.dimension):
@@ -235,6 +134,20 @@ class FlagCode:
 
         self.construct_graph()
 
+    def args(self):
+        return (self.boundary_operators,)
+
+    def kwargs(self):
+        return {
+            'cell_positions': self.cell_positions,
+            'x': self.x,
+            'z': self.z,
+            'add_boundary_pins': self.add_boundary_pins,
+            'stabilizer_types': self.stabilizer_types,
+            'reduce_logical_iter': self.reduce_logicals_iter,
+            'verbose': self.verbose
+        }
+
     def log(self, *args, **kwargs):
         """Print function, conditioned on the self.verbose attribute.
         Takes all the arguments of the standard print function
@@ -242,7 +155,7 @@ class FlagCode:
         if self.verbose:
             print(*args, **kwargs)
 
-    def add_boundary_pins(self):
+    def construct_boundary_pins(self):
         """Changes the first and last boundary operators to make all the weights even"""
 
         new_column = np.array([np.sum(self.boundary_operators[-1], axis=1) % 2]).T
@@ -351,7 +264,7 @@ class FlagCode:
 
         self.nx_graph = nx.from_numpy_array(self.flag_adjacency_matrix)
 
-    def get_all_rainbow_subgraphs(
+    def get_rainbow_subgraphs(
         self,
         colors: Union[Set[int], List[int]],
         graph: Graph = None,
@@ -378,124 +291,10 @@ class FlagCode:
             by the `return_format` argument
         """
 
-        if return_format not in ['set', 'array']:
-            raise ValueError(
-                f"'return_format' must take value in ['set', 'array'],"
-                f"not {return_format}"
-            )
-
         if graph is None:
             graph = self.flag_graph
 
-        colors = set(colors)
-
-        rainbow_subgraphs = set()
-
-        def find_rainbow_subgraphs(
-            partial_subgraph: Graph,
-            explorable_nodes: Set[int],
-            finished_nodes: Set[int]
-        ):
-            if len(explorable_nodes) == 0:
-                # We found a rainbow subgraph
-                edges = tuple(sorted(partial_subgraph.edges))
-                nodes = tuple(sorted(partial_subgraph.nodes))
-                rainbow_subgraphs.add(nodes)
-                return {edges}
-
-            # self.log("\n===== New exploration =====\n")
-            # self.log("Partial subgraph", partial_subgraph)
-            # self.log("Explorable nodes", explorable_nodes)
-            # self.log("Finished nodes", finished_nodes)
-
-            max_subgraphs = set()
-
-            for node in explorable_nodes.copy():
-                # self.log("\nExploring node", node)
-                explored_colors = {color for _, color in partial_subgraph[node]}
-                remaining_colors = colors - explored_colors
-
-                for adj_node, color in graph[node]:
-                    if (color in remaining_colors
-                            and not (adj_node in finished_nodes)
-                            and color not in partial_subgraph.connected_colors(adj_node)
-                            and colors.issubset(graph.connected_colors(adj_node))):
-                        prev_explorable_nodes = explorable_nodes.copy()
-                        prev_finished_nodes = finished_nodes.copy()
-
-                        partial_subgraph.add_edge(node, adj_node, color)
-                        explorable_nodes.add(adj_node)
-
-                        if len(partial_subgraph.connected_colors(adj_node)) == len(colors):
-                            explorable_nodes.remove(adj_node)
-                            finished_nodes.add(adj_node)
-
-                        if len(partial_subgraph.connected_colors(node)) == len(colors):
-                            explorable_nodes.remove(node)
-                            finished_nodes.add(node)
-
-                        subgraph_of_max_subgraph = False
-                        for max_subgraph in max_subgraphs:
-                            if (node, adj_node) in max_subgraph:
-                                subgraph_of_max_subgraph = True
-                                break
-
-                        if not subgraph_of_max_subgraph:
-                            # self.log("Trying new adjacent node", adj_node)
-                            subgraphs = find_rainbow_subgraphs(
-                                partial_subgraph,
-                                explorable_nodes,
-                                finished_nodes
-                            )
-                            # self.log("Output max subgraphs: ", subgraphs)
-                            max_subgraphs.update(subgraphs)
-                        # else:
-                            # self.log("Already visited")
-
-                        partial_subgraph.remove_edge(node, adj_node, color)
-
-                        explorable_nodes = prev_explorable_nodes
-                        finished_nodes = prev_finished_nodes
-
-            if len(max_subgraphs) == 0:
-                max_subgraphs = {tuple(sorted(partial_subgraph.edges))}
-
-            # self.log("\nReturn", max_subgraphs)
-            return max_subgraphs
-
-        max_subgraphs = set()
-        for node in range(self.n_flags):
-            # print(f"Explore node {node+1} / {self.n_flags}", end='\r')
-            partial_subgraph = Graph(self.n_flags)
-            explorable_nodes = {node}
-            finished_nodes = set()
-
-            has_all_colors = (
-                colors.issubset(graph.connected_colors(node))
-            )
-
-            node_included_in_max_subgraph = False
-            if has_all_colors:
-                for max_subgraph in max_subgraphs:
-                    for edge in max_subgraph:
-                        if edge[0] == node or edge[1] == node:
-                            node_included_in_max_subgraph = True
-
-            if has_all_colors and not node_included_in_max_subgraph:
-                max_subgraphs.update(
-                    find_rainbow_subgraphs(partial_subgraph, explorable_nodes, finished_nodes)
-                )
-
-        if return_format == 'array':
-            subgraphs_output = []
-            for subgraph_nodes in rainbow_subgraphs:
-                subgraph_array = np.zeros(self.n_flags, dtype='uint8')
-                subgraph_array[list(subgraph_nodes)] = 1
-                subgraphs_output.append(subgraph_array)
-        elif return_format == 'set':
-            subgraphs_output = list(map(set, rainbow_subgraphs))
-
-        return subgraphs_output
+        return get_rainbow_subgraphs(graph, colors, return_format=return_format)
 
     def get_all_maximal_subgraphs(
         self,
@@ -620,16 +419,31 @@ class FlagCode:
                     for max_subgraph in maximal_subgraphs[free_colors]
                 ])
             else:
-                n_max_subgraphs = len(maximal_subgraphs[free_colors])
-                for i, max_graph in enumerate(maximal_subgraphs[free_colors]):
-                    self.log(
-                        f"Explore maximal subgraph {i+1} / {n_max_subgraphs}"
-                        f" with colors {free_colors}",
-                        end='\r'
-                    )
-                    final_subgraphs.extend(self.get_all_rainbow_subgraphs(
-                        free_colors, graph=max_graph, return_format='array'
-                    ))
+                # def worker_func(arg):
+                #     i = arg[0]
+                #     graph = arg[1]
+
+                #     print(
+                #         f"\rExploring maximal subgraph {i+1} / {n_max_subgraphs}"
+                #         f" with colors {free_colors}\n", end='\r', flush=True
+                #     )
+                #     rainbows = get_rainbow_subgraphs(
+                #         graph, colors=free_colors, return_format='array'
+                #     )
+                #     return rainbows
+                worker_func = partial(
+                    get_rainbow_subgraphs,
+                    colors=free_colors,
+                    return_format='array'
+                )
+
+                results = p_map(
+                    worker_func,
+                    maximal_subgraphs[free_colors],
+                    desc=f"Rainbow subgraphs of color {free_colors}"
+                )
+
+                final_subgraphs.extend([result for sublist in results for result in sublist])
 
         return np.array(final_subgraphs)
 
@@ -646,7 +460,7 @@ class FlagCode:
         """
         logicals = get_all_logicals(
             self.Hx, self.Hz, self.k, reduce_iter=self.reduce_logicals_iter,
-            verbose=verbose
+            osd_order=self.osd_order, verbose=verbose
         )
 
         self._x_logicals = logicals['X']
@@ -1016,6 +830,13 @@ def get_operator_weights(operator: np.ndarray) -> Dict[int, int]:
     return {w: c for w, c in zip(weights, count)}
 
 
+def reduce_flag_code(obj: FlagCode):
+    return (FlagCode, (obj.args, obj.kwargs))  # Adjust the arguments as needed
+
+
+copyreg.pickle(FlagCode, reduce_flag_code)
+
+
 if __name__ == "__main__":
     from flaq.chain_complex import DoubleSquareComplex
 
@@ -1035,4 +856,4 @@ if __name__ == "__main__":
         verbose=True
     )
 
-    flag_code.get_all_rainbow_subgraphs([1, 2])
+    flag_code.get_rainbow_subgraphs([1, 2])
