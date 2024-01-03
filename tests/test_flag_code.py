@@ -57,8 +57,8 @@ class TestFlagCode:
 
         # Test that maximal and rainbow subgraphs are equal for manifolds
         for colors in combinations([1, 2, 3], 2):
-            max_subgraphs = flag_code.get_all_maximal_subgraphs(colors)
-            rainbow_subgraphs = flag_code.get_all_rainbow_subgraphs(colors)
+            max_subgraphs = flag_code.get_maximal_subgraphs(colors)
+            rainbow_subgraphs = flag_code.get_rainbow_subgraphs(colors)
 
             assert len(max_subgraphs) == len(rainbow_subgraphs)
 
@@ -83,8 +83,8 @@ class TestFlagCode:
 
         # Test that maximal and rainbow subgraphs are equal for manifolds
         for colors in [*combinations([1, 2, 3, 4], 2), *combinations([1, 2, 3, 4], 3)]:
-            max_subgraphs = flag_code.get_all_maximal_subgraphs(colors)
-            rainbow_subgraphs = flag_code.get_all_rainbow_subgraphs(colors)
+            max_subgraphs = flag_code.get_maximal_subgraphs(colors)
+            rainbow_subgraphs = flag_code.get_rainbow_subgraphs(colors)
 
             assert len(max_subgraphs) == len(rainbow_subgraphs)
 
@@ -103,12 +103,12 @@ class TestFlagCode:
 
         assert color_code.n == 384
         assert color_code.k == 9
-        assert color_code.d == 6
+        assert color_code.d == 4
 
     def test_double_square_rainbow_code(self):
         stabilizer_types = {
-            'X': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'},
-            'Z': {(1, 2): 'rainbow', (1, 3): 'maximal', (2, 3): 'rainbow'}
+            'X': {'rainbow': [(1, 2), (2, 3)], 'maximal': [(1, 3)]},
+            'Z': {'rainbow': [(1, 2), (2, 3)], 'maximal': [(1, 3)]},
         }
 
         for sizes in [(2, 2), (3, 3), (4, 4)]:

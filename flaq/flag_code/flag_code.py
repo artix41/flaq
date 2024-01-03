@@ -1,6 +1,5 @@
 import copyreg
 from itertools import combinations, product
-from functools import partial
 import sys
 from typing import List, Set, Tuple, Union, Dict, Optional
 
@@ -24,7 +23,7 @@ class FlagCode:
         x: int = 2,
         z: int = 2,
         add_boundary_pins: bool = True,
-        stabilizer_types: Optional[Dict[str, Dict[Tuple, str]]] = None,
+        stabilizer_types: Optional[Dict[str, Dict[str, List[Tuple]]]] = None,
         reduce_logicals_iter: int = 0,
         osd_order=6,
         verbose: bool = False
@@ -97,10 +96,12 @@ class FlagCode:
         if self.stabilizer_types is None:
             self.stabilizer_types = {
                 'X': {
-                    'maximal': list(map(tuple, combinations(self.all_colors, self.x)))
+                    'maximal': list(map(tuple, combinations(self.all_colors, self.x))),
+                    'rainbow': []
                 },
                 'Z': {
-                    'maximal': list(map(tuple, combinations(self.all_colors, self.z)))
+                    'maximal': list(map(tuple, combinations(self.all_colors, self.z))),
+                    'rainbow': []
                 }
             }
 
@@ -302,7 +303,7 @@ class FlagCode:
 
         return get_rainbow_subgraphs(graph, colors, return_format=return_format)
 
-    def get_all_maximal_subgraphs(
+    def get_maximal_subgraphs(
         self,
         colors: Set[int],
         graph: Graph = None,
@@ -380,7 +381,7 @@ class FlagCode:
             True if the flag graph defines a pin code relation
         """
         for color in self.all_colors:
-            max_subgraphs = self.get_all_maximal_subgraphs({color})
+            max_subgraphs = self.get_maximal_subgraphs({color})
             for subgraph in max_subgraphs:
                 if len(subgraph) % 2 == 1:
                     return False
@@ -413,7 +414,7 @@ class FlagCode:
         final_subgraphs = []
 
         for colors in stabilizer_types['maximal'] + stabilizer_types['rainbow']:
-            maximal_subgraphs[colors] = self.get_all_maximal_subgraphs(
+            maximal_subgraphs[colors] = self.get_maximal_subgraphs(
                 colors, return_format='graph'
             )
 
@@ -427,7 +428,7 @@ class FlagCode:
         for colors in stabilizer_types['rainbow']:
             list_args.extend([(colors, g) for g in maximal_subgraphs[colors]])
 
-        worker_func = lambda x: get_rainbow_subgraphs(
+        worker_func = lambda x: get_rainbow_subgraphs(  # noqa
             graph=x[1],
             colors=x[0],
             return_format='array'
@@ -608,7 +609,7 @@ class FlagCode:
         free_colors = set(range(1, self.dimension+1))
         free_colors = {1, 3}
 
-        maximal_subgraphs: Set[Graph] = self.get_all_maximal_subgraphs(
+        maximal_subgraphs: Set[Graph] = self.get_maximal_subgraphs(
             free_colors, return_format='graph'
         )
 
@@ -618,7 +619,7 @@ class FlagCode:
             unit_graphs: List[Graph] = []
             for color in free_colors:
                 unit_graphs.extend(
-                    list(self.get_all_maximal_subgraphs(
+                    list(self.get_maximal_subgraphs(
                         {color}, max_subgraph, return_format='graph'
                     ))
                 )
