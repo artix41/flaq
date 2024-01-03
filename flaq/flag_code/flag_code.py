@@ -97,17 +97,23 @@ class FlagCode:
         if self.stabilizer_types is None:
             self.stabilizer_types = {
                 'X': {
-                    tuple(free_colors): 'maximal'
-                    for free_colors in combinations(self.all_colors, self.x)
+                    'maximal': list(map(tuple, combinations(self.all_colors, self.x)))
                 },
                 'Z': {
-                    tuple(free_colors): 'maximal'
-                    for free_colors in combinations(self.all_colors, self.z)
+                    'maximal': list(map(tuple, combinations(self.all_colors, self.z)))
                 }
             }
 
         if set(self.stabilizer_types.keys()) != {'X', 'Z'}:
             raise ValueError("'stabilizer_types' should have keys 'X' and 'Z'")
+
+        for pauli in [('X', self.x), ('Z', self.z)]:
+            all_colors = (
+                self.stabilizer_types[pauli[0]]['maximal']
+                + self.stabilizer_types[pauli[0]]['rainbow']
+            )
+            if set(all_colors) != set(combinations(self.all_colors, pauli[1])):
+                raise ValueError(f"'stabilizers_types['{pauli[0]}'] does not contain all colors")
 
         self.has_boundary_vertex = False
         self.has_boundary_cell = False
@@ -383,21 +389,18 @@ class FlagCode:
 
     def get_stabilizers(
         self,
-        n_free: int,
-        stabilizer_types: Dict[Tuple, str] = None
+        stabilizer_types: Dict[str, List[Tuple]] = None
     ) -> np.ndarray:
         """Get the parity-check matrix corresponding to stabilizers defined
-        by `n_free`-subgraphs. The subgraphs are either rainbow or maximal,
+        by k-subgraphs. The subgraphs are either rainbow or maximal,
         as specified in `stabilizer_types`.
 
         Parameters
         ----------
-        n_free : int
-            Number of colors that define the maximal or rainbow subgraphs.
-        stabilizer_types : Dict[Tuple, str], optional
-            Dictionary that specifies for each tuple of free colors, whether we want
-            a 'rainbow' or a 'maximal' subgraph.
-            By default None ('maximal' for every subgraph)/
+        stabilizer_types : Dict[str, List[Tuple]], optional
+            Dictionary that specifies the list of tuples of free colors that
+            we want to be either 'rainbow' or 'maximal' subgraphs.
+            By default None ('maximal' for every subgraph)
 
         Returns
         -------
@@ -409,41 +412,34 @@ class FlagCode:
         maximal_subgraphs = {}
         final_subgraphs = []
 
-        for free_colors in combinations(self.all_colors, n_free):
-            maximal_subgraphs[free_colors] = self.get_all_maximal_subgraphs(
-                free_colors, return_format='graph'
+        for colors in stabilizer_types['maximal'] + stabilizer_types['rainbow']:
+            maximal_subgraphs[colors] = self.get_all_maximal_subgraphs(
+                colors, return_format='graph'
             )
-            if stabilizer_types[tuple(free_colors)] == 'maximal':
-                final_subgraphs.extend([
-                    max_subgraph.as_array()
-                    for max_subgraph in maximal_subgraphs[free_colors]
-                ])
-            else:
-                # def worker_func(arg):
-                #     i = arg[0]
-                #     graph = arg[1]
 
-                #     print(
-                #         f"\rExploring maximal subgraph {i+1} / {n_max_subgraphs}"
-                #         f" with colors {free_colors}\n", end='\r', flush=True
-                #     )
-                #     rainbows = get_rainbow_subgraphs(
-                #         graph, colors=free_colors, return_format='array'
-                #     )
-                #     return rainbows
-                worker_func = partial(
-                    get_rainbow_subgraphs,
-                    colors=free_colors,
-                    return_format='array'
-                )
+        for colors in stabilizer_types['maximal']:
+            final_subgraphs.extend([
+                max_subgraph.as_array()
+                for max_subgraph in maximal_subgraphs[colors]
+            ])
 
-                results = p_map(
-                    worker_func,
-                    maximal_subgraphs[free_colors],
-                    desc=f"Rainbow subgraphs of color {free_colors}"
-                )
+        list_args = []
+        for colors in stabilizer_types['rainbow']:
+            list_args.extend([(colors, g) for g in maximal_subgraphs[colors]])
 
-                final_subgraphs.extend([result for sublist in results for result in sublist])
+        worker_func = lambda x: get_rainbow_subgraphs(
+            graph=x[1],
+            colors=x[0],
+            return_format='array'
+        )
+
+        results = p_map(
+            worker_func,
+            list_args,
+            desc="Getting rainbow subgraphs"
+        )
+
+        final_subgraphs.extend([result for sublist in results for result in sublist])
 
         return np.array(final_subgraphs)
 
@@ -473,28 +469,28 @@ class FlagCode:
     @property
     def x_logicals(self) -> np.ndarray:
         if self._x_logicals is None:
-            self.get_logicals()
+            self.get_logicals(verbose=self.verbose)
 
         return self._x_logicals
 
     @property
     def z_logicals(self) -> np.ndarray:
         if self._z_logicals is None:
-            self.get_logicals()
+            self.get_logicals(verbose=self.verbose)
 
         return self._z_logicals
 
     @property
     def Hx(self):
         if self._Hx is None:
-            self._Hx = self.get_stabilizers(self.x, self.stabilizer_types['X'])
+            self._Hx = self.get_stabilizers(self.stabilizer_types['X'])
 
         return self._Hx
 
     @property
     def Hz(self):
         if self._Hz is None:
-            self._Hz = self.get_stabilizers(self.z, self.stabilizer_types['Z'])
+            self._Hz = self.get_stabilizers(self.stabilizer_types['Z'])
 
         return self._Hz
 
@@ -557,7 +553,13 @@ class FlagCode:
         """
         return np.all((self.Hx @ self.Hz.T) % 2 == 0)
 
-    def is_multiorthogonal(self, k: int = 3, pauli: str = 'X'):
+    def is_multiorthogonal(
+        self,
+        k: int = 3,
+        pauli: str = 'X',
+        levels: Optional[List[int]] = None
+    ):
+
         if pauli == 'X':
             H = self.Hx
             L = self.x_logicals
@@ -565,15 +567,17 @@ class FlagCode:
             H = self.Hz
             L = self.z_logicals
 
-        for n_L in range(k):
+        if levels is None:
+            levels = list(range(k))
+
+        for n_L in levels:
             indices = list(product(
                 *[range(L.shape[0]) for _ in range(n_L)],
                 *[range(H.shape[0]) for _ in range(k-n_L)]
             ))
-
             for i, index in enumerate(indices):
                 if i % 100 == 0:  # used to reduce the print rate (useful in notebooks)
-                    self.log(
+                    print(
                         f"{k}-orthogonality with {n_L} logicals: "
                         f"{round((i+1) / len(indices) * 100)}%",
                         end='\r'
