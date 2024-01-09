@@ -1,5 +1,5 @@
 import pickle
-from typing import Union, Set, List
+from typing import Union, Set, List, Tuple, Dict
 import sys
 
 import numpy as np
@@ -12,16 +12,20 @@ class Graph:
     def __init__(self, n_nodes: int):
         self.n_nodes = n_nodes
 
-        self.adj_list = [set() for _ in range(n_nodes)]
-        self.edges = set()
-        self.nodes = set()
-        self.color_count = dict()
+        self.adj_list: List[Set[Tuple[int, int]]] = [set() for _ in range(n_nodes)]
+        self.edges: Set[Tuple[int, int]] = set()
+        self.nodes: Set[int] = set()
+        self.color_count: Dict[int, int] = dict()
 
     def add_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].add((node2, color))
         self.adj_list[node2].add((node1, color))
-        self.edges.add((node1, node2))
-        self.edges.add((node2, node1))
+
+        if node1 < node2:
+            self.edges.add((node1, node2))
+        else:
+            self.edges.add((node2, node1))
+
         self.nodes.add(node1)
         self.nodes.add(node2)
 
@@ -33,8 +37,9 @@ class Graph:
     def remove_edge(self, node1: int, node2: int, color: int):
         self.adj_list[node1].remove((node2, color))
         self.adj_list[node2].remove((node1, color))
-        self.edges.remove((node1, node2))
-        self.edges.remove((node2, node1))
+
+        self.edges.discard((node1, node2))
+        self.edges.discard((node2, node1))
 
         if len(self.adj_list[node1]) == 0:
             self.nodes.remove(node1)
@@ -63,7 +68,7 @@ class Graph:
 
         return new_graph
 
-    def connected_colors(self, node):
+    def connected_colors(self, node: int):
         return [adj_node[1] for adj_node in self.adj_list[node]]
 
     def is_subgraph(self, bigger_graph):
@@ -117,7 +122,7 @@ class Graph:
 
         return hashed_value
 
-    def __eq__(self, g):
+    def __eq__(self, g: "Graph"):
         return (g.adj_list == self.adj_list)
 
 
@@ -196,8 +201,10 @@ def get_rainbow_subgraphs(
                         finished_nodes.add(node)
 
                     subgraph_of_max_subgraph = False
+                    edge = (node, adj_node) if node < adj_node else (adj_node, node)
+
                     for max_subgraph in max_subgraphs:
-                        if (node, adj_node) in max_subgraph:
+                        if edge in max_subgraph:
                             subgraph_of_max_subgraph = True
                             break
 
