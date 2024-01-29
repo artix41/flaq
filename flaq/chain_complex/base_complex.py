@@ -8,7 +8,7 @@ import numpy as np
 from pyvis.network import Network
 from scipy.sparse import csr_array
 
-from flaq.utils import get_all_logicals
+from flaq.utils import get_all_logicals, draw_bipartite_graph
 
 
 class BaseComplex(ABC):
@@ -140,28 +140,9 @@ class BaseComplex(ABC):
         index_boundary_operator: int = 0,
         notebook: bool = False
     ) -> Network:
-        graph = nx.algorithms.bipartite.from_biadjacency_matrix(
-            csr_array(self.boundary_operators[index_boundary_operator])
+        nt = draw_bipartite_graph(
+            self.boundary_operators[index_boundary_operator],
+            notebook=notebook
         )
-        node_type = [graph.nodes[i]['bipartite'] for i in range(len(graph.nodes))]
-
-        graph = nx.convert_node_labels_to_integers(graph)
-
-        nt = Network(notebook=notebook, cdn_resources='remote')
-        nt.from_nx(graph)
-
-        for edge in nt.get_edges():
-            edge['width'] = 7
-
-        for node_id in nt.get_nodes():
-            node = nt.get_node(node_id)
-            node['label'] = str(node['id'])
-            node['shape'] = ['box', 'circle'][node_type[node_id]]
-            if not node_type[node_id]:
-                node['color'] = 'orange'
-
-            node['font'] = {'size': 45}
-
-        nt.show('nx.html')
 
         return nt

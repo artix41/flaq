@@ -615,7 +615,13 @@ class FlagCode:
 
         for max_subgraph in maximal_subgraphs:
             # print("Max subgraph", max_subgraph.nodes)
-            # Get all maximal 1-graphs (aka unit graphs)
+
+            edges = list(max_subgraph.edges)
+
+            n_edges = len(edges)
+            n_vertices = len(max_subgraph.nodes)
+
+            # ZZ color code overlap operators (vertices of max-1-graph)
             unit_graphs: List[Graph] = []
             for color in free_colors:
                 unit_graphs.extend(
@@ -624,44 +630,56 @@ class FlagCode:
                     ))
                 )
 
-            # print("Unit graphs", [g.nodes for g in unit_graphs])
-            n = len(unit_graphs)
-            # print("Number of unit graphs", n)
+            n_unit_graphs = len(unit_graphs)
 
-            n_ancillas = n - len(max_subgraph.nodes)
-            # print("n_ancillas", n_ancillas)
+            n_ancillas = n_unit_graphs - n_vertices
 
-            # Get all X operators of the overlap toric code group,
-            # by considering the adjacency matrix of connected unit graphs
-            adj_matrix = np.zeros((n, n), dtype='uint8')
-            for i in range(n):
-                for j in range(n):
-                    if i != j and len(unit_graphs[i].nodes & unit_graphs[j].nodes) != 0:
-                        adj_matrix[i, j] = 1
-                        adj_matrix[j, i] = 1
-
-            # print("Adj matrix", adj_matrix)
-
-            n_x_ops_tc = rank(adj_matrix)
-            # print("Number of X ops TC", n_x_ops_tc)
-
-            # Get all X operators of the overlap color code group
-            unit_graph_arrays = np.array(
+            unit_graph_matrix = np.array(
                 [unit_graph.as_array() for unit_graph in unit_graphs]
             )
 
-            n_x_ops_cc = n - 2*(n - rank(unit_graph_arrays))
-            # print("Number of X ops CC", n_x_ops_cc)
+            n_z_ops_cc = rank(unit_graph_matrix)
 
-            if n_x_ops_cc + n_ancillas != n_x_ops_tc:
+            # XX color code overlap operators (vertices of edges)
+            edge_matrix = np.zeros((n_edges, self.n_flags))
+            for i in range(n_edges):
+                node1, node2 = edges[i]
+                edge_matrix[i][node1] = 1
+                edge_matrix[i][node2] = 1
+
+            n_x_ops_cc = rank(edge_matrix)
+
+            # Single Z toric code overlap operators (one per max-1-graph)
+            n_z_ops_tc = len(unit_graphs)
+
+            # Neighboring XX toric code overlap operators (neighbors of edges)
+            neighbor_matrix = np.zeros((n_edges, n_unit_graphs), dtype='uint8')
+            for i in range(n_edges):
+                for j in range(n_unit_graphs):
+                    # print(edges[j])
+                    # print(unit_graphs[j].nodes)
+                    if len(set(edges[i]) & unit_graphs[j].nodes) == 1:
+                        neighbor_matrix[i, j] = 1
+
+            n_x_ops_tc = rank(neighbor_matrix)
+
+            # print("Adj matrix", adj_matrix)
+            # print("n_x_ops_cc", n_x_ops_cc)
+            # print("n_z_ops_cc", n_z_ops_cc)
+            # print("n_x_ops_tc", n_x_ops_tc)
+            # print("n_z_ops_tc", n_z_ops_tc)
+            # print("n_ancillas", n_ancillas)
+
+            if n_x_ops_cc + n_z_ops_cc + n_ancillas != n_x_ops_tc + n_z_ops_tc:
                 return False
 
             # Get the center of the overlap groups
-            n_gen_center_tc = rank(nullspace(adj_matrix))
+            n_gen_center_tc = rank(nullspace(neighbor_matrix))
 
-            # print("Nullspace TC", nullspace(adj_matrix))
-
-            n_gen_center_cc = 2*rank(nullspace(unit_graph_arrays[:, list(max_subgraph.nodes)]))
+            n_gen_center_cc = (
+                rank(nullspace(unit_graph_matrix[:, list(max_subgraph.nodes)])) +
+                rank(nullspace(edge_matrix[:, list(max_subgraph.nodes)]))
+            )
 
             # print("n_gen_center_tc", n_gen_center_tc)
             # print("n_gen_center_cc", n_gen_center_cc)

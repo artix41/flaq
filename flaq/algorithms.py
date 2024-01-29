@@ -1,6 +1,12 @@
+from collections import deque
+import heapq
+import queue
+
+from functools import reduce
+
 import pickle
-from typing import Union, Set, List, Tuple, Dict
 import sys
+from typing import Union, Set, List, Tuple, Dict, Optional
 
 import numpy as np
 
@@ -259,3 +265,87 @@ def get_rainbow_subgraphs(
         subgraphs_output = list(map(set, rainbow_subgraphs))
 
     return subgraphs_output
+
+
+def get_spanning_tree(adjacency_matrix: np.ndarray) -> List[Set[int]]:
+    n = len(adjacency_matrix)
+    spanning_tree: List[Set[int]] = [set() for _ in range(n)]
+    visited_nodes: Set[int] = set()
+    rejected_edges: Set[Tuple[int, int]] = set()
+
+    weights = adjacency_matrix.sum(axis=1)
+
+    class Node:
+        def __init__(self, val: int):
+            self.val = val
+
+        def __repr__(self):
+            return f'{self.val}'
+
+        def __lt__(self, other):
+            return weights[self.val] < weights[other.val]
+
+    max_node = adjacency_matrix.sum(axis=1).argmax()
+    to_visit = queue.PriorityQueue()
+    to_visit.put(Node(max_node))
+    visited_nodes.add(max_node)
+
+    while to_visit.qsize() > 0:
+        node = to_visit.get().val
+
+        for adj_node in adjacency_matrix[node].nonzero()[0]:
+            if adj_node not in visited_nodes:
+                to_visit.put(Node(adj_node))
+                spanning_tree[node].add(adj_node)
+                spanning_tree[adj_node].add(node)
+                visited_nodes.add(adj_node)
+
+    for node in range(n):
+        for adj_node in adjacency_matrix[node].nonzero()[0]:
+            if adj_node not in spanning_tree[node]:
+                edge = (min(node, adj_node), max(node, adj_node))
+                rejected_edges.add(edge)
+
+    return spanning_tree, rejected_edges
+
+
+def find_simple_cycles(biadjacency_matrix: np.ndarray) -> List[List[int]]:
+    n_a, n_b = biadjacency_matrix.shape
+
+    adjacency_matrix = np.block([
+        [np.zeros((n_a, n_a), dtype=np.uint8), biadjacency_matrix],
+        [biadjacency_matrix.T, np.zeros((n_b, n_b), dtype=np.uint8)],
+    ])
+    n = n_a + n_b
+
+    spanning_tree, rejected_edges = get_spanning_tree(adjacency_matrix)
+
+    def find_cycle(
+        current_node: int,
+        end_node: int,
+        visited: Optional[List[bool]] = None,
+        parent_node: int = -1
+    ) -> Set[int]:
+        if visited is None:
+            visited = [False for _ in range(n)]
+
+        visited[current_node] = True
+
+        if current_node == end_node:
+            return {current_node}
+
+        for adj_node in spanning_tree[current_node]:
+            if (not visited[adj_node]) and (adj_node != parent_node):
+                cycle = find_cycle(adj_node, end_node, visited, current_node)
+
+                if cycle is not None:
+                    cycle.add(current_node)
+                    return cycle
+
+        return None
+
+    simple_cycles = []
+    for edge in rejected_edges:
+        simple_cycles.append(find_cycle(edge[0], edge[1]))
+
+    return simple_cycles

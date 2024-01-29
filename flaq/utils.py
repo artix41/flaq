@@ -1,6 +1,9 @@
 from ldpc import bposd_decoder
 from ldpc.mod2 import rank, nullspace
 import numpy as np
+import networkx as nx
+from pyvis.network import Network
+from scipy.sparse import csr_array
 
 
 def log(*args, verbose=False, **kwargs):
@@ -56,6 +59,9 @@ def reduce_logical(H, logical, n_iter, random=False):
 
 
 def get_minimum_logicals(H, anti_logical_basis, osd_order=6, verbose=False):
+    if len(anti_logical_basis) == 0:
+        return []
+
     H_with_logical = np.vstack([H, anti_logical_basis])
 
     decoder = bposd_decoder(
@@ -115,3 +121,31 @@ def get_arbitrary_logicals(Hx, Hz, pauli='X', k=None, verbose=False):
     log("Done", verbose=verbose)
 
     return logicals
+
+
+def draw_bipartite_graph(biadjacency_matrix: np.ndarray, notebook: bool = True):
+    graph = nx.algorithms.bipartite.from_biadjacency_matrix(
+        csr_array(biadjacency_matrix)
+    )
+    node_type = [graph.nodes[i]['bipartite'] for i in range(len(graph.nodes))]
+
+    graph = nx.convert_node_labels_to_integers(graph)
+
+    nt = Network(notebook=notebook, cdn_resources='in_line')
+    nt.from_nx(graph)
+
+    for edge in nt.get_edges():
+        edge['width'] = 8
+
+    for node_id in nt.get_nodes():
+        node = nt.get_node(node_id)
+        node['label'] = str(node['id'])
+        node['shape'] = ['box', 'circle'][node_type[node_id]]
+        if not node_type[node_id]:
+            node['color'] = 'orange'
+
+        node['font'] = {'size': 45}
+
+    nt.show('nx.html')
+
+    return nt
